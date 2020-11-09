@@ -3,11 +3,12 @@ htop - solaris/Platform.c
 (C) 2014 Hisham H. Muhammad
 (C) 2015 David C. Hunt
 (C) 2017,2018 Guy M. Broome
-Released under the GNU GPL, see the COPYING file
+Released under the GNU GPLv2, see the COPYING file
 in the source distribution for its full text.
 */
 
 #include "Platform.h"
+#include "Macros.h"
 #include "Meter.h"
 #include "CPUMeter.h"
 #include "MemoryMeter.h"
@@ -15,8 +16,12 @@ in the source distribution for its full text.
 #include "TasksMeter.h"
 #include "LoadAverageMeter.h"
 #include "ClockMeter.h"
+#include "DateMeter.h"
+#include "DateTimeMeter.h"
 #include "HostnameMeter.h"
 #include "UptimeMeter.h"
+#include "zfs/ZfsArcMeter.h"
+#include "zfs/ZfsCompressedArcMeter.h"
 #include "SolarisProcess.h"
 #include "SolarisProcessList.h"
 
@@ -31,28 +36,6 @@ in the source distribution for its full text.
 #include <math.h>
 #include <sys/var.h>
 
-/*{
-#include "Action.h"
-#include "BatteryMeter.h"
-#include "SignalsPanel.h"
-#include <signal.h>
-#include <sys/mkdev.h>
-#include <sys/proc.h>
-#include <libproc.h>
-
-#define  kill(pid, signal) kill(pid / 1024, signal)
-
-extern ProcessFieldData Process_fields[];
-typedef struct var kvar_t;
-
-typedef struct envAccum_ {
-   size_t capacity;
-   size_t size;
-   size_t bytes;
-   char *env;
-} envAccum;
-
-}*/
 
 double plat_loadavg[3] = {0};
 
@@ -101,13 +84,15 @@ const SignalItem Platform_signals[] = {
    { .name = "41 SIGINFO",     .number = 41 },
 };
 
-const unsigned int Platform_numberOfSignals = sizeof(Platform_signals)/sizeof(SignalItem);
+const unsigned int Platform_numberOfSignals = ARRAYSIZE(Platform_signals);
 
 ProcessField Platform_defaultFields[] = { PID, LWPID, USER, PRIORITY, NICE, M_SIZE, M_RESIDENT, STATE, PERCENT_CPU, PERCENT_MEM, TIME, COMM, 0 };
 
-MeterClass* Platform_meterTypes[] = {
+const MeterClass* const Platform_meterTypes[] = {
    &CPUMeter_class,
    &ClockMeter_class,
+   &DateMeter_class,
+   &DateTimeMeter_class,
    &LoadAverageMeter_class,
    &LoadMeter_class,
    &MemoryMeter_class,
@@ -118,10 +103,18 @@ MeterClass* Platform_meterTypes[] = {
    &UptimeMeter_class,
    &AllCPUsMeter_class,
    &AllCPUs2Meter_class,
+   &AllCPUs4Meter_class,
+   &AllCPUs8Meter_class,
    &LeftCPUsMeter_class,
    &RightCPUsMeter_class,
    &LeftCPUs2Meter_class,
    &RightCPUs2Meter_class,
+   &LeftCPUs4Meter_class,
+   &RightCPUs4Meter_class,
+   &LeftCPUs8Meter_class,
+   &RightCPUs8Meter_class,
+   &ZfsArcMeter_class,
+   &ZfsCompressedArcMeter_class,
    &BlankMeter_class,
    NULL
 };
@@ -174,9 +167,9 @@ int Platform_getMaxPid() {
 }
 
 double Platform_setCPUValues(Meter* this, int cpu) {
-   SolarisProcessList* spl = (SolarisProcessList*) this->pl;
+   const SolarisProcessList* spl = (const SolarisProcessList*) this->pl;
    int cpus = this->pl->cpuCount;
-   CPUData* cpuData = NULL;
+   const CPUData* cpuData = NULL;
 
    if (cpus == 1) {
      // single CPU box has everything in spl->cpus[0]
@@ -193,24 +186,24 @@ double Platform_setCPUValues(Meter* this, int cpu) {
    if (this->pl->settings->detailedCPUTime) {
       v[CPU_METER_KERNEL]  = cpuData->systemPercent;
       v[CPU_METER_IRQ]     = cpuData->irqPercent;
-      Meter_setItems(this, 4);
+      this->curItems = 4;
       percent = v[0]+v[1]+v[2]+v[3];
    } else {
       v[2] = cpuData->systemAllPercent;
-      Meter_setItems(this, 3);
+      this->curItems = 3;
       percent = v[0]+v[1]+v[2];
    }
 
    percent = CLAMP(percent, 0.0, 100.0);
    if (isnan(percent)) percent = 0.0;
 
-   v[CPU_METER_FREQUENCY] = -1;
+   v[CPU_METER_FREQUENCY] = NAN;
 
    return percent;
 }
 
 void Platform_setMemoryValues(Meter* this) {
-   ProcessList* pl = (ProcessList*) this->pl;
+   const ProcessList* pl = this->pl;
    this->total = pl->totalMem;
    this->values[0] = pl->usedMem;
    this->values[1] = pl->buffersMem;
@@ -218,9 +211,21 @@ void Platform_setMemoryValues(Meter* this) {
 }
 
 void Platform_setSwapValues(Meter* this) {
-   ProcessList* pl = (ProcessList*) this->pl;
+   const ProcessList* pl = this->pl;
    this->total = pl->totalSwap;
    this->values[0] = pl->usedSwap;
+}
+
+void Platform_setZfsArcValues(Meter* this) {
+   const SolarisProcessList* spl = (const SolarisProcessList*) this->pl;
+
+   ZfsArcMeter_readStats(this, &(spl->zfs));
+}
+
+void Platform_setZfsCompressedArcValues(Meter* this) {
+   const SolarisProcessList* spl = (const SolarisProcessList*) this->pl;
+
+   ZfsCompressedArcMeter_readStats(this, &(spl->zfs));
 }
 
 static int Platform_buildenv(void *accum, struct ps_prochandle *Phandle, uintptr_t addr, const char *str) {
@@ -257,4 +262,22 @@ char* Platform_getProcessEnv(pid_t pid) {
 
    strncpy( envBuilder.env + envBuilder.size, "\0", 1);
    return envBuilder.env;
+}
+
+bool Platform_getDiskIO(DiskIOData* data) {
+   // TODO
+   (void)data;
+   return false;
+}
+
+bool Platform_getNetworkIO(unsigned long int *bytesReceived,
+                           unsigned long int *packetsReceived,
+                           unsigned long int *bytesTransmitted,
+                           unsigned long int *packetsTransmitted) {
+   // TODO
+   *bytesReceived = 0;
+   *packetsReceived = 0;
+   *bytesTransmitted = 0;
+   *packetsTransmitted = 0;
+   return false;
 }

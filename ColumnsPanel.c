@@ -1,33 +1,24 @@
 /*
 htop - ColumnsPanel.c
 (C) 2004-2011 Hisham H. Muhammad
-Released under the GNU GPL, see the COPYING file
+Released under the GNU GPLv2, see the COPYING file
 in the source distribution for its full text.
 */
 
 #include "ColumnsPanel.h"
-#include "Platform.h"
 
-#include "StringUtils.h"
-#include "ListItem.h"
-#include "CRT.h"
-
-#include <assert.h>
-#include <stdlib.h>
 #include <ctype.h>
+#include <stdlib.h>
 
-/*{
-#include "Panel.h"
-#include "Settings.h"
+#include "CRT.h"
+#include "FunctionBar.h"
+#include "ListItem.h"
+#include "Object.h"
+#include "Platform.h"
+#include "Process.h"
+#include "ProvideCurses.h"
+#include "XUtils.h"
 
-typedef struct ColumnsPanel_ {
-   Panel super;
-
-   Settings* settings;
-   bool moving;
-} ColumnsPanel;
-
-}*/
 
 static const char* const ColumnsFunctions[] = {"      ", "      ", "      ", "      ", "      ", "      ", "MoveUp", "MoveDn", "Remove", "Done  ", NULL};
 
@@ -55,7 +46,9 @@ static HandlerResult ColumnsPanel_eventHandler(Panel* super, int ch) {
          if (selected < size - 1) {
             this->moving = !(this->moving);
             Panel_setSelectionColor(super, this->moving ? CRT_colors[PANEL_SELECTION_FOLLOW] : CRT_colors[PANEL_SELECTION_FOCUS]);
-            ((ListItem*)Panel_getSelected(super))->moving = this->moving;
+            ListItem* selectedItem = (ListItem*) Panel_getSelected(super);
+            if (selectedItem)
+               selectedItem->moving = this->moving;
             result = HANDLED;
          }
          break;
@@ -103,7 +96,7 @@ static HandlerResult ColumnsPanel_eventHandler(Panel* super, int ch) {
       }
       default:
       {
-         if (ch < 255 && isalpha(ch))
+         if (0 < ch && ch < 255 && isalpha((unsigned char)ch))
             result = Panel_selectByTyping(super, ch);
          if (result == BREAK_LOOP)
             result = IGNORED;
@@ -115,7 +108,7 @@ static HandlerResult ColumnsPanel_eventHandler(Panel* super, int ch) {
    return result;
 }
 
-PanelClass ColumnsPanel_class = {
+const PanelClass ColumnsPanel_class = {
    .super = {
       .extends = Class(Panel),
       .delete = ColumnsPanel_delete
@@ -142,15 +135,6 @@ ColumnsPanel* ColumnsPanel_new(Settings* settings) {
    return this;
 }
 
-int ColumnsPanel_fieldNameToIndex(const char* name) {
-   for (int j = 1; j <= Platform_numberOfFields; j++) {
-      if (String_eq(name, Process_fields[j].name)) {
-         return j;
-      }
-   }
-   return -1;
-}
-
 void ColumnsPanel_update(Panel* super) {
    ColumnsPanel* this = (ColumnsPanel*) super;
    int size = Panel_size(super);
@@ -164,4 +148,3 @@ void ColumnsPanel_update(Panel* super) {
    }
    this->settings->fields[size] = 0;
 }
-

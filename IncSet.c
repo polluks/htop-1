@@ -1,51 +1,24 @@
 /*
 htop - IncSet.c
 (C) 2005-2012 Hisham H. Muhammad
-Released under the GNU GPL, see the COPYING file
+Released under the GNU GPLv2, see the COPYING file
 in the source distribution for its full text.
 */
 
+#include "config.h" // IWYU pragma: keep
+
 #include "IncSet.h"
-#include "StringUtils.h"
-#include "Panel.h"
-#include "ListItem.h"
-#include "CRT.h"
+
+#include <ctype.h>
 #include <string.h>
 #include <stdlib.h>
 
-/*{
+#include "CRT.h"
+#include "ListItem.h"
+#include "Object.h"
+#include "ProvideCurses.h"
+#include "XUtils.h"
 
-#include "FunctionBar.h"
-#include "Panel.h"
-#include <stdbool.h>
-
-#define INCMODE_MAX 40
-
-typedef enum {
-   INC_SEARCH = 0,
-   INC_FILTER = 1
-} IncType;
-
-#define IncSet_filter(inc_) (inc_->filtering ? inc_->modes[INC_FILTER].buffer : NULL)
-
-typedef struct IncMode_ {
-   char buffer[INCMODE_MAX+1];
-   int index;
-   FunctionBar* bar;
-   bool isFilter;
-} IncMode;
-
-typedef struct IncSet_ {
-   IncMode modes[2];
-   IncMode* active;
-   FunctionBar* defaultBar;
-   bool filtering;
-   bool found;
-} IncSet;
-
-typedef const char* (*IncMode_GetPanelValue)(Panel*, int);
-
-}*/
 
 static void IncMode_reset(IncMode* mode) {
    mode->index = 0;
@@ -129,10 +102,11 @@ static bool search(IncMode* mode, Panel* panel, IncMode_GetPanelValue getPanelVa
          break;
       }
    }
-   if (found)
-      FunctionBar_draw(mode->bar, mode->buffer);
-   else
-      FunctionBar_drawAttr(mode->bar, mode->buffer, CRT_colors[FAILED_SEARCH]);
+
+   FunctionBar_drawExtra(mode->bar,
+                         mode->buffer,
+                         found ? -1 : CRT_colors[FAILED_SEARCH],
+                         true);
    return found;
 }
 
@@ -171,7 +145,7 @@ bool IncSet_handleKey(IncSet* this, int ch, Panel* panel, IncMode_GetPanelValue 
       if (size == 0) return true;
       IncMode_find(mode, panel, getPanelValue, 1);
       doSearch = false;
-   } else if (ch < 255 && isprint((char)ch)) {
+   } else if (0 < ch && ch < 255 && isprint((unsigned char)ch)) {
       if (mode->index < INCMODE_MAX) {
          mode->buffer[mode->index] = ch;
          mode->index++;
@@ -211,7 +185,7 @@ bool IncSet_handleKey(IncSet* this, int ch, Panel* panel, IncMode_GetPanelValue 
       }
       this->active = NULL;
       Panel_setDefaultBar(panel);
-      FunctionBar_draw(this->defaultBar, NULL);
+      FunctionBar_draw(this->defaultBar);
       doSearch = false;
    }
    if (doSearch) {
@@ -232,15 +206,15 @@ const char* IncSet_getListItemValue(Panel* panel, int i) {
 
 void IncSet_activate(IncSet* this, IncType type, Panel* panel) {
    this->active = &(this->modes[type]);
-   FunctionBar_draw(this->active->bar, this->active->buffer);
+   FunctionBar_drawExtra(this->active->bar, this->active->buffer, -1, true);
    panel->currentBar = this->active->bar;
 }
 
-void IncSet_drawBar(IncSet* this) {
+void IncSet_drawBar(const IncSet* this) {
    if (this->active) {
-      FunctionBar_draw(this->active->bar, this->active->buffer);
+      FunctionBar_drawExtra(this->active->bar, this->active->buffer, -1, true);
    } else {
-      FunctionBar_draw(this->defaultBar, NULL);
+      FunctionBar_draw(this->defaultBar);
    }
 }
 

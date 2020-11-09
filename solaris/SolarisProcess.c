@@ -2,7 +2,7 @@
 htop - SolarisProcess.c
 (C) 2015 Hisham H. Muhammad
 (C) 2017,2018 Guy M. Broome
-Released under the GNU GPL, see the COPYING file
+Released under the GNU GPLv2, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -17,59 +17,15 @@ in the source distribution for its full text.
 #include <unistd.h>
 #include <sys/syscall.h>
 
-/*{
-#include "Settings.h"
-#include <zone.h>
-#include <sys/proc.h>
-#include <libproc.h>
 
-typedef enum SolarisProcessFields {
-   // Add platform-specific fields here, with ids >= 100
-   ZONEID   = 100,
-   ZONE  = 101,
-   PROJID = 102,
-   TASKID = 103,
-   POOLID = 104,
-   CONTID = 105,
-   LWPID = 106,
-   LAST_PROCESSFIELD = 107,
-} SolarisProcessField;
-
-
-typedef struct SolarisProcess_ {
-   Process    super;
-   int        kernel;
-   zoneid_t   zoneid;
-   char*      zname;
-   taskid_t   taskid;
-   projid_t   projid;
-   poolid_t   poolid;
-   ctid_t     contid;
-   bool       is_lwp;
-   pid_t      realpid;
-   pid_t      realppid;
-   pid_t      lwpid;
-} SolarisProcess;
-
-
-#ifndef Process_isKernelThread
-#define Process_isKernelThread(_process) (_process->kernel == 1)
-#endif
-
-#ifndef Process_isUserlandThread
-#define Process_isUserlandThread(_process) (_process->pid != _process->tgid)
-#endif
-
-}*/
-
-ProcessClass SolarisProcess_class = {
+const ProcessClass SolarisProcess_class = {
    .super = {
       .extends = Class(Process),
       .display = Process_display,
       .delete = Process_delete,
       .compare = SolarisProcess_compare
    },
-   .writeField = (Process_WriteField) SolarisProcess_writeField,
+   .writeField = SolarisProcess_writeField,
 };
 
 ProcessFieldData Process_fields[] = {
@@ -123,11 +79,11 @@ ProcessPidColumn Process_pidColumns[] = {
    { .id = 0, .label = NULL },
 };
 
-SolarisProcess* SolarisProcess_new(Settings* settings) {
+Process* SolarisProcess_new(const Settings* settings) {
    SolarisProcess* this = xCalloc(1, sizeof(SolarisProcess));
    Object_setClass(this, Class(SolarisProcess));
    Process_init(&this->super, settings);
-   return this;
+   return &this->super;
 }
 
 void Process_delete(Object* cast) {
@@ -137,8 +93,8 @@ void Process_delete(Object* cast) {
    free(sp);
 }
 
-void SolarisProcess_writeField(Process* this, RichString* str, ProcessField field) {
-   SolarisProcess* sp = (SolarisProcess*) this;
+void SolarisProcess_writeField(const Process* this, RichString* str, ProcessField field) {
+   const SolarisProcess* sp = (const SolarisProcess*) this;
    char buffer[256]; buffer[255] = '\0';
    int attr = CRT_colors[DEFAULT_COLOR];
    int n = sizeof(buffer) - 1;
@@ -149,14 +105,7 @@ void SolarisProcess_writeField(Process* this, RichString* str, ProcessField fiel
    case TASKID: xSnprintf(buffer, n, Process_pidFormat, sp->taskid); break;
    case POOLID: xSnprintf(buffer, n, Process_pidFormat, sp->poolid); break;
    case CONTID: xSnprintf(buffer, n, Process_pidFormat, sp->contid); break;
-   case ZONE:{
-      xSnprintf(buffer, n, "%-*s ", ZONENAME_MAX/4, sp->zname); break;
-      if (buffer[ZONENAME_MAX/4] != '\0') {
-         buffer[ZONENAME_MAX/4] = ' ';
-         buffer[(ZONENAME_MAX/4)+1] = '\0';
-      }
-      break;
-   }
+   case ZONE: xSnprintf(buffer, n, "%-*s ", ZONENAME_MAX/4, sp->zname); break;
    case PID: xSnprintf(buffer, n, Process_pidFormat, sp->realpid); break;
    case PPID: xSnprintf(buffer, n, Process_pidFormat, sp->realppid); break;
    case LWPID: xSnprintf(buffer, n, Process_pidFormat, sp->lwpid); break;
@@ -168,14 +117,14 @@ void SolarisProcess_writeField(Process* this, RichString* str, ProcessField fiel
 }
 
 long SolarisProcess_compare(const void* v1, const void* v2) {
-   SolarisProcess *p1, *p2;
-   Settings* settings = ((Process*)v1)->settings;
+   const SolarisProcess *p1, *p2;
+   const Settings* settings = ((const Process*)v1)->settings;
    if (settings->direction == 1) {
-      p1 = (SolarisProcess*)v1;
-      p2 = (SolarisProcess*)v2;
+      p1 = (const SolarisProcess*)v1;
+      p2 = (const SolarisProcess*)v2;
    } else {
-      p2 = (SolarisProcess*)v1;
-      p1 = (SolarisProcess*)v2;
+      p2 = (const SolarisProcess*)v1;
+      p1 = (const SolarisProcess*)v2;
    }
    switch ((int) settings->sortKey) {
    case ZONEID:
@@ -201,8 +150,8 @@ long SolarisProcess_compare(const void* v1, const void* v2) {
    }
 }
 
-bool Process_isThread(Process* this) {
-   SolarisProcess* fp = (SolarisProcess*) this;
+bool Process_isThread(const Process* this) {
+   const SolarisProcess* fp = (const SolarisProcess*) this;
 
    if (fp->kernel == 1 ) {
       return 1;

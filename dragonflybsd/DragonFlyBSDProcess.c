@@ -2,7 +2,7 @@
 htop - dragonflybsd/DragonFlyBSDProcess.c
 (C) 2015 Hisham H. Muhammad
 (C) 2017 Diederik de Groot
-Released under the GNU GPL, see the COPYING file
+Released under the GNU GPLv2, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -17,43 +17,15 @@ in the source distribution for its full text.
 #include <unistd.h>
 #include <sys/syscall.h>
 
-/*{
 
-typedef enum DragonFlyBSDProcessFields {
-   // Add platform-specific fields here, with ids >= 100
-   JID   = 100,
-   JAIL  = 101,
-   LAST_PROCESSFIELD = 102,
-} DragonFlyBSDProcessField;
-
-
-typedef struct DragonFlyBSDProcess_ {
-   Process super;
-   int   kernel;
-   int   jid;
-   char* jname;
-} DragonFlyBSDProcess;
-
-
-#ifndef Process_isKernelThread
-#define Process_isKernelThread(_process) (_process->kernel == 1)
-#endif
-
-#ifndef Process_isUserlandThread
-//#define Process_isUserlandThread(_process) (_process->pid != _process->tgid)
-#define Process_isUserlandThread(_process) (_process->nlwp > 1)
-#endif
-
-}*/
-
-ProcessClass DragonFlyBSDProcess_class = {
+const ProcessClass DragonFlyBSDProcess_class = {
    .super = {
       .extends = Class(Process),
       .display = Process_display,
       .delete = Process_delete,
       .compare = DragonFlyBSDProcess_compare
    },
-   .writeField = (Process_WriteField) DragonFlyBSDProcess_writeField,
+   .writeField = DragonFlyBSDProcess_writeField,
 };
 
 ProcessFieldData Process_fields[] = {
@@ -97,11 +69,11 @@ ProcessPidColumn Process_pidColumns[] = {
    { .id = 0, .label = NULL },
 };
 
-DragonFlyBSDProcess* DragonFlyBSDProcess_new(Settings* settings) {
+Process* DragonFlyBSDProcess_new(const Settings* settings) {
    DragonFlyBSDProcess* this = xCalloc(1, sizeof(DragonFlyBSDProcess));
    Object_setClass(this, Class(DragonFlyBSDProcess));
    Process_init(&this->super, settings);
-   return this;
+   return &this->super;
 }
 
 void Process_delete(Object* cast) {
@@ -111,8 +83,8 @@ void Process_delete(Object* cast) {
    free(this);
 }
 
-void DragonFlyBSDProcess_writeField(Process* this, RichString* str, ProcessField field) {
-   DragonFlyBSDProcess* fp = (DragonFlyBSDProcess*) this;
+void DragonFlyBSDProcess_writeField(const Process* this, RichString* str, ProcessField field) {
+   const DragonFlyBSDProcess* fp = (const DragonFlyBSDProcess*) this;
    char buffer[256]; buffer[255] = '\0';
    int attr = CRT_colors[DEFAULT_COLOR];
    int n = sizeof(buffer) - 1;
@@ -136,14 +108,14 @@ void DragonFlyBSDProcess_writeField(Process* this, RichString* str, ProcessField
 }
 
 long DragonFlyBSDProcess_compare(const void* v1, const void* v2) {
-   DragonFlyBSDProcess *p1, *p2;
-   Settings *settings = ((Process*)v1)->settings;
+   const DragonFlyBSDProcess *p1, *p2;
+   const Settings *settings = ((const Process*)v1)->settings;
    if (settings->direction == 1) {
-      p1 = (DragonFlyBSDProcess*)v1;
-      p2 = (DragonFlyBSDProcess*)v2;
+      p1 = (const DragonFlyBSDProcess*)v1;
+      p2 = (const DragonFlyBSDProcess*)v2;
    } else {
-      p2 = (DragonFlyBSDProcess*)v1;
-      p1 = (DragonFlyBSDProcess*)v2;
+      p2 = (const DragonFlyBSDProcess*)v1;
+      p1 = (const DragonFlyBSDProcess*)v2;
    }
    switch ((int) settings->sortKey) {
    // add Platform-specific fields here
@@ -156,8 +128,8 @@ long DragonFlyBSDProcess_compare(const void* v1, const void* v2) {
    }
 }
 
-bool Process_isThread(Process* this) {
-   DragonFlyBSDProcess* fp = (DragonFlyBSDProcess*) this;
+bool Process_isThread(const Process* this) {
+   const DragonFlyBSDProcess* fp = (const DragonFlyBSDProcess*) this;
 
    if (fp->kernel == 1 )
       return 1;

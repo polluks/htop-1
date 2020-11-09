@@ -2,34 +2,29 @@
 htop - darwin/Platform.c
 (C) 2014 Hisham H. Muhammad
 (C) 2015 David C. Hunt
-Released under the GNU GPL, see the COPYING file
+Released under the GNU GPLv2, see the COPYING file
 in the source distribution for its full text.
 */
 
 #include "Platform.h"
+#include "Macros.h"
 #include "CPUMeter.h"
 #include "MemoryMeter.h"
 #include "SwapMeter.h"
 #include "TasksMeter.h"
 #include "LoadAverageMeter.h"
 #include "ClockMeter.h"
+#include "DateMeter.h"
+#include "DateTimeMeter.h"
 #include "HostnameMeter.h"
 #include "UptimeMeter.h"
+#include "zfs/ZfsArcMeter.h"
+#include "zfs/ZfsCompressedArcMeter.h"
 #include "DarwinProcessList.h"
 
+#include <math.h>
 #include <stdlib.h>
 
-/*{
-#include "Action.h"
-#include "SignalsPanel.h"
-#include "CPUMeter.h"
-#include "BatteryMeter.h"
-#include "DarwinProcess.h"
-}*/
-
-#ifndef CLAMP
-#define CLAMP(x,low,high) (((x)>(high))?(high):(((x)<(low))?(low):(x)))
-#endif
 
 ProcessField Platform_defaultFields[] = { PID, USER, PRIORITY, NICE, M_SIZE, M_RESIDENT, STATE, PERCENT_CPU, PERCENT_MEM, TIME, COMM, 0 };
 
@@ -69,7 +64,7 @@ const SignalItem Platform_signals[] = {
    { .name = "31 SIGUSR2",   .number = 31 },
 };
 
-const unsigned int Platform_numberOfSignals = sizeof(Platform_signals)/sizeof(SignalItem);
+const unsigned int Platform_numberOfSignals = ARRAYSIZE(Platform_signals);
 
 ProcessFieldData Process_fields[] = {
    [0] = { .name = "", .title = NULL, .description = NULL, .flags = 0, },
@@ -100,9 +95,11 @@ ProcessFieldData Process_fields[] = {
    [100] = { .name = "*** report bug! ***", .title = NULL, .description = NULL, .flags = 0, },
 };
 
-MeterClass* Platform_meterTypes[] = {
+const MeterClass* const Platform_meterTypes[] = {
    &CPUMeter_class,
    &ClockMeter_class,
+   &DateMeter_class,
+   &DateTimeMeter_class,
    &LoadAverageMeter_class,
    &LoadMeter_class,
    &MemoryMeter_class,
@@ -113,10 +110,18 @@ MeterClass* Platform_meterTypes[] = {
    &UptimeMeter_class,
    &AllCPUsMeter_class,
    &AllCPUs2Meter_class,
+   &AllCPUs4Meter_class,
+   &AllCPUs8Meter_class,
    &LeftCPUsMeter_class,
    &RightCPUsMeter_class,
    &LeftCPUs2Meter_class,
    &RightCPUs2Meter_class,
+   &LeftCPUs4Meter_class,
+   &RightCPUs4Meter_class,
+   &LeftCPUs8Meter_class,
+   &RightCPUs8Meter_class,
+   &ZfsArcMeter_class,
+   &ZfsCompressedArcMeter_class,
    &BlankMeter_class,
    NULL
 };
@@ -171,8 +176,8 @@ ProcessPidColumn Process_pidColumns[] = {
 };
 
 static double Platform_setCPUAverageValues(Meter* mtr) {
-   DarwinProcessList *dpl = (DarwinProcessList *)mtr->pl;
-   int cpus = dpl->super.cpuCount;
+   const ProcessList *dpl = mtr->pl;
+   int cpus = dpl->cpuCount;
    double sumNice = 0.0;
    double sumNormal = 0.0;
    double sumKernel = 0.0;
@@ -195,9 +200,9 @@ double Platform_setCPUValues(Meter* mtr, int cpu) {
       return Platform_setCPUAverageValues(mtr);
    }
 
-   DarwinProcessList *dpl = (DarwinProcessList *)mtr->pl;
-   processor_cpu_load_info_t prev = &dpl->prev_load[cpu-1];
-   processor_cpu_load_info_t curr = &dpl->curr_load[cpu-1];
+   const DarwinProcessList *dpl = (const DarwinProcessList *)mtr->pl;
+   const processor_cpu_load_info_t prev = &dpl->prev_load[cpu-1];
+   const processor_cpu_load_info_t curr = &dpl->curr_load[cpu-1];
    double total = 0;
 
    /* Take the sums */
@@ -212,19 +217,19 @@ double Platform_setCPUValues(Meter* mtr, int cpu) {
    mtr->values[CPU_METER_KERNEL]
            = ((double)curr->cpu_ticks[CPU_STATE_SYSTEM] - (double)prev->cpu_ticks[CPU_STATE_SYSTEM])* 100.0 / total;
 
-   Meter_setItems(mtr, 3);
+   mtr->curItems = 3;
 
    /* Convert to percent and return */
    total = mtr->values[CPU_METER_NICE] + mtr->values[CPU_METER_NORMAL] + mtr->values[CPU_METER_KERNEL];
 
-   mtr->values[CPU_METER_FREQUENCY] = -1;
+   mtr->values[CPU_METER_FREQUENCY] = NAN;
 
    return CLAMP(total, 0.0, 100.0);
 }
 
 void Platform_setMemoryValues(Meter* mtr) {
-   DarwinProcessList *dpl = (DarwinProcessList *)mtr->pl;
-   vm_statistics_t vm = &dpl->vm_stats;
+   const DarwinProcessList *dpl = (const DarwinProcessList *)mtr->pl;
+   const struct vm_statistics* vm = &dpl->vm_stats;
    double page_K = (double)vm_page_size / (double)1024;
 
    mtr->total = dpl->host_info.max_mem / 1024;
@@ -243,6 +248,18 @@ void Platform_setSwapValues(Meter* mtr) {
   mtr->values[0] = swapused.xsu_used / 1024;
 }
 
+void Platform_setZfsArcValues(Meter* this) {
+   const DarwinProcessList* dpl = (const DarwinProcessList*) this->pl;
+
+   ZfsArcMeter_readStats(this, &(dpl->zfs));
+}
+
+void Platform_setZfsCompressedArcValues(Meter* this) {
+   const DarwinProcessList* dpl = (const DarwinProcessList*) this->pl;
+
+   ZfsCompressedArcMeter_readStats(this, &(dpl->zfs));
+}
+
 char* Platform_getProcessEnv(pid_t pid) {
    char* env = NULL;
 
@@ -258,11 +275,11 @@ char* Platform_getProcessEnv(pid_t pid) {
          mib[0] = CTL_KERN;
          mib[1] = KERN_PROCARGS2;
          mib[2] = pid;
-         size_t bufsz = argmax;
+         bufsz = argmax;
          if (sysctl(mib, 3, buf, &bufsz, 0, 0) == 0) {
             if (bufsz > sizeof(int)) {
                char *p = buf, *endp = buf + bufsz;
-               int argc = *(int*)p;
+               int argc = *(int*)(void*)p;
                p += sizeof(int);
 
                // skip exe
@@ -292,4 +309,22 @@ char* Platform_getProcessEnv(pid_t pid) {
    }
 
    return env;
+}
+
+bool Platform_getDiskIO(DiskIOData* data) {
+   // TODO
+   (void)data;
+   return false;
+}
+
+bool Platform_getNetworkIO(unsigned long int *bytesReceived,
+                           unsigned long int *packetsReceived,
+                           unsigned long int *bytesTransmitted,
+                           unsigned long int *packetsTransmitted) {
+   // TODO
+   *bytesReceived = 0;
+   *packetsReceived = 0;
+   *bytesTransmitted = 0;
+   *packetsTransmitted = 0;
+   return false;
 }

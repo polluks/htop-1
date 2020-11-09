@@ -2,37 +2,30 @@
 htop - Affinity.c
 (C) 2004-2011 Hisham H. Muhammad
 (C) 2020 Red Hat, Inc.  All Rights Reserved.
-Released under the GNU GPL, see the COPYING file
+Released under the GNU GPLv2, see the COPYING file
 in the source distribution for its full text.
 */
+
+#include "config.h"
 
 #include "Affinity.h"
 
 #include <stdlib.h>
 
+#include "XUtils.h"
+
 #ifdef HAVE_LIBHWLOC
 #include <hwloc.h>
-#if __linux__
+#include <hwloc/bitmap.h>
+#ifdef __linux__
 #define HTOP_HWLOC_CPUBIND_FLAG HWLOC_CPUBIND_THREAD
 #else
 #define HTOP_HWLOC_CPUBIND_FLAG HWLOC_CPUBIND_PROCESS
 #endif
-#elif HAVE_LINUX_AFFINITY
+#elif defined(HAVE_LINUX_AFFINITY)
 #include <sched.h>
 #endif
 
-/*{
-#include "Process.h"
-#include "ProcessList.h"
-
-typedef struct Affinity_ {
-   ProcessList* pl;
-   int size;
-   int used;
-   int* cpus;
-} Affinity;
-
-}*/
 
 Affinity* Affinity_new(ProcessList* pl) {
    Affinity* this = xCalloc(1, sizeof(Affinity));
@@ -91,7 +84,7 @@ bool Affinity_set(Process* proc, Arg arg) {
    return ok;
 }
 
-#elif HAVE_LINUX_AFFINITY
+#elif defined(HAVE_LINUX_AFFINITY)
 
 Affinity* Affinity_get(Process* proc, ProcessList* pl) {
    cpu_set_t cpuset;

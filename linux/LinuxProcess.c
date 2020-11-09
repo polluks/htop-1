@@ -2,165 +2,24 @@
 htop - LinuxProcess.c
 (C) 2014 Hisham H. Muhammad
 (C) 2020 Red Hat, Inc.  All Rights Reserved.
-Released under the GNU GPL, see the COPYING file
+Released under the GNU GPLv2, see the COPYING file
 in the source distribution for its full text.
 */
 
-#include "Process.h"
-#include "ProcessList.h"
 #include "LinuxProcess.h"
-#include "Platform.h"
-#include "CRT.h"
 
+#include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <string.h>
-#include <sys/syscall.h>
-#include <time.h>
+#include <syscall.h>
+#include <unistd.h>
 
-/*{
+#include "CRT.h"
+#include "Process.h"
+#include "ProvideCurses.h"
+#include "XUtils.h"
 
-#define PROCESS_FLAG_LINUX_IOPRIO   0x0100
-#define PROCESS_FLAG_LINUX_OPENVZ   0x0200
-#define PROCESS_FLAG_LINUX_VSERVER  0x0400
-#define PROCESS_FLAG_LINUX_CGROUP   0x0800
-#define PROCESS_FLAG_LINUX_OOM      0x1000
-#define PROCESS_FLAG_LINUX_SMAPS    0x2000
-
-typedef enum UnsupportedProcessFields {
-   FLAGS = 9,
-   ITREALVALUE = 20,
-   VSIZE = 22,
-   RSS = 23,
-   RLIM = 24,
-   STARTCODE = 25,
-   ENDCODE = 26,
-   STARTSTACK = 27,
-   KSTKESP = 28,
-   KSTKEIP = 29,
-   SIGNAL = 30,
-   BLOCKED = 31,
-   SSIGIGNORE = 32,
-   SIGCATCH = 33,
-   WCHAN = 34,
-   NSWAP = 35,
-   CNSWAP = 36,
-   EXIT_SIGNAL = 37,
-} UnsupportedProcessField;
-
-typedef enum LinuxProcessFields {
-   CMINFLT = 11,
-   CMAJFLT = 13,
-   UTIME = 14,
-   STIME = 15,
-   CUTIME = 16,
-   CSTIME = 17,
-   M_SHARE = 41,
-   M_TRS = 42,
-   M_DRS = 43,
-   M_LRS = 44,
-   M_DT = 45,
-   #ifdef HAVE_OPENVZ
-   CTID = 100,
-   VPID = 101,
-   #endif
-   #ifdef HAVE_VSERVER
-   VXID = 102,
-   #endif
-   #ifdef HAVE_TASKSTATS
-   RCHAR = 103,
-   WCHAR = 104,
-   SYSCR = 105,
-   SYSCW = 106,
-   RBYTES = 107,
-   WBYTES = 108,
-   CNCLWB = 109,
-   IO_READ_RATE = 110,
-   IO_WRITE_RATE = 111,
-   IO_RATE = 112,
-   #endif
-   #ifdef HAVE_CGROUP
-   CGROUP = 113,
-   #endif
-   OOM = 114,
-   IO_PRIORITY = 115,
-   #ifdef HAVE_DELAYACCT
-   PERCENT_CPU_DELAY = 116,
-   PERCENT_IO_DELAY = 117,
-   PERCENT_SWAP_DELAY = 118,
-   #endif
-   M_PSS = 119,
-   M_SWAP = 120,
-   M_PSSWP = 121,
-   LAST_PROCESSFIELD = 122,
-} LinuxProcessField;
-
-#include "IOPriority.h"
-
-typedef struct LinuxProcess_ {
-   Process super;
-   bool isKernelThread;
-   IOPriority ioPriority;
-   unsigned long int cminflt;
-   unsigned long int cmajflt;
-   unsigned long long int utime;
-   unsigned long long int stime;
-   unsigned long long int cutime;
-   unsigned long long int cstime;
-   long m_share;
-   long m_pss;
-   long m_swap;
-   long m_psswp;
-   long m_trs;
-   long m_drs;
-   long m_lrs;
-   long m_dt;
-   unsigned long long starttime;
-   #ifdef HAVE_TASKSTATS
-   unsigned long long io_rchar;
-   unsigned long long io_wchar;
-   unsigned long long io_syscr;
-   unsigned long long io_syscw;
-   unsigned long long io_read_bytes;
-   unsigned long long io_write_bytes;
-   unsigned long long io_cancelled_write_bytes;
-   unsigned long long io_rate_read_time;
-   unsigned long long io_rate_write_time;
-   double io_rate_read_bps;
-   double io_rate_write_bps;
-   #endif
-   #ifdef HAVE_OPENVZ
-   unsigned int ctid;
-   unsigned int vpid;
-   #endif
-   #ifdef HAVE_VSERVER
-   unsigned int vxid;
-   #endif
-   #ifdef HAVE_CGROUP
-   char* cgroup;
-   #endif
-   unsigned int oom;
-   char* ttyDevice;
-   #ifdef HAVE_DELAYACCT
-   unsigned long long int delay_read_time;
-   unsigned long long cpu_delay_total;
-   unsigned long long blkio_delay_total;
-   unsigned long long swapin_delay_total;
-   float cpu_delay_percent;
-   float blkio_delay_percent;
-   float swapin_delay_percent;
-   #endif
-} LinuxProcess;
-
-#ifndef Process_isKernelThread
-#define Process_isKernelThread(_process) (((LinuxProcess*)(_process))->isKernelThread)
-#endif
-
-#ifndef Process_isUserlandThread
-#define Process_isUserlandThread(_process) (_process->pid != _process->tgid)
-#endif
-
-}*/
 
 /* semi-global */
 long long btime;
@@ -210,8 +69,8 @@ ProcessFieldData Process_fields[] = {
    [M_SHARE] = { .name = "M_SHARE", .title = "  SHR ", .description = "Size of the process's shared pages", .flags = 0, },
    [M_TRS] = { .name = "M_TRS", .title = " CODE ", .description = "Size of the text segment of the process", .flags = 0, },
    [M_DRS] = { .name = "M_DRS", .title = " DATA ", .description = "Size of the data segment plus stack usage of the process", .flags = 0, },
-   [M_LRS] = { .name = "M_LRS", .title = " LIB ", .description = "The library size of the process", .flags = 0, },
-   [M_DT] = { .name = "M_DT", .title = " DIRTY ", .description = "Size of the dirty pages of the process", .flags = 0, },
+   [M_LRS] = { .name = "M_LRS", .title = " LIB ", .description = "The library size of the process (unused since Linux 2.6; always 0)", .flags = 0, },
+   [M_DT] = { .name = "M_DT", .title = " DIRTY ", .description = "Size of the dirty pages of the process (unused since Linux 2.6; always 0)", .flags = 0, },
    [ST_UID] = { .name = "ST_UID", .title = "  UID ", .description = "User ID of the process owner", .flags = 0, },
    [PERCENT_CPU] = { .name = "PERCENT_CPU", .title = "CPU% ", .description = "Percentage of the CPU time the process used in the last sampling", .flags = 0, },
    [PERCENT_MEM] = { .name = "PERCENT_MEM", .title = "MEM% ", .description = "Percentage of the memory the process is using, based on resident memory size", .flags = 0, },
@@ -220,8 +79,8 @@ ProcessFieldData Process_fields[] = {
    [NLWP] = { .name = "NLWP", .title = "NLWP ", .description = "Number of threads in the process", .flags = 0, },
    [TGID] = { .name = "TGID", .title = "   TGID ", .description = "Thread group ID (i.e. process ID)", .flags = 0, },
 #ifdef HAVE_OPENVZ
-   [CTID] = { .name = "CTID", .title = "   CTID ", .description = "OpenVZ container ID (a.k.a. virtual environment ID)", .flags = PROCESS_FLAG_LINUX_OPENVZ, },
-   [VPID] = { .name = "VPID", .title = " VPID ", .description = "OpenVZ process ID", .flags = PROCESS_FLAG_LINUX_OPENVZ, },
+   [CTID] = { .name = "CTID", .title = " CTID    ", .description = "OpenVZ container ID (a.k.a. virtual environment ID)", .flags = PROCESS_FLAG_LINUX_OPENVZ, },
+   [VPID] = { .name = "VPID", .title = "    VPID ", .description = "OpenVZ process ID", .flags = PROCESS_FLAG_LINUX_OPENVZ, },
 #endif
 #ifdef HAVE_VSERVER
    [VXID] = { .name = "VXID", .title = " VXID ", .description = "VServer process ID", .flags = PROCESS_FLAG_LINUX_VSERVER, },
@@ -241,7 +100,7 @@ ProcessFieldData Process_fields[] = {
 #ifdef HAVE_CGROUP
    [CGROUP] = { .name = "CGROUP", .title = "    CGROUP ", .description = "Which cgroup the process is in", .flags = PROCESS_FLAG_LINUX_CGROUP, },
 #endif
-   [OOM] = { .name = "OOM", .title = "    OOM ", .description = "OOM (Out-of-Memory) killer score", .flags = PROCESS_FLAG_LINUX_OOM, },
+   [OOM] = { .name = "OOM", .title = " OOM ", .description = "OOM (Out-of-Memory) killer score", .flags = PROCESS_FLAG_LINUX_OOM, },
    [IO_PRIORITY] = { .name = "IO_PRIORITY", .title = "IO ", .description = "I/O priority", .flags = PROCESS_FLAG_LINUX_IOPRIO, },
 #ifdef HAVE_DELAYACCT
    [PERCENT_CPU_DELAY] = { .name = "PERCENT_CPU_DELAY", .title = "CPUD% ", .description = "CPU delay %", .flags = 0, },
@@ -251,6 +110,8 @@ ProcessFieldData Process_fields[] = {
    [M_PSS] = { .name = "M_PSS", .title = "  PSS ", .description = "proportional set size, same as M_RESIDENT but each page is divided by the number of processes sharing it.", .flags = PROCESS_FLAG_LINUX_SMAPS, },
    [M_SWAP] = { .name = "M_SWAP", .title = " SWAP ", .description = "Size of the process's swapped pages", .flags = PROCESS_FLAG_LINUX_SMAPS, },
    [M_PSSWP] = { .name = "M_PSSWP", .title = " PSSWP ", .description = "shows proportional swap share of this mapping, Unlike \"Swap\", this does not take into account swapped out page of underlying shmem objects.", .flags = PROCESS_FLAG_LINUX_SMAPS, },
+   [CTXT] = { .name = "CTXT", .title = " CTXT ", .description = "Context switches (incremental sum of voluntary_ctxt_switches and nonvoluntary_ctxt_switches)", .flags = PROCESS_FLAG_LINUX_CTXT, },
+   [SECATTR] = { .name = "SECATTR", .title = " Security Attribute ", .description = "Security attribute of the process (e.g. SELinux or AppArmor)", .flags = PROCESS_FLAG_LINUX_SECATTR, },
    [LAST_PROCESSFIELD] = { .name = "*** report bug! ***", .title = NULL, .description = NULL, .flags = 0, },
 };
 
@@ -264,25 +125,24 @@ ProcessPidColumn Process_pidColumns[] = {
    { .id = TGID, .label = "TGID" },
    { .id = PGRP, .label = "PGRP" },
    { .id = SESSION, .label = "SID" },
-   { .id = OOM, .label = "OOM" },
    { .id = 0, .label = NULL },
 };
 
-ProcessClass LinuxProcess_class = {
+const ProcessClass LinuxProcess_class = {
    .super = {
       .extends = Class(Process),
       .display = Process_display,
       .delete = Process_delete,
       .compare = LinuxProcess_compare
    },
-   .writeField = (Process_WriteField) LinuxProcess_writeField,
+   .writeField = LinuxProcess_writeField,
 };
 
-LinuxProcess* LinuxProcess_new(Settings* settings) {
+Process* LinuxProcess_new(const Settings* settings) {
    LinuxProcess* this = xCalloc(1, sizeof(LinuxProcess));
    Object_setClass(this, Class(LinuxProcess));
    Process_init(&this->super, settings);
-   return this;
+   return &this->super;
 }
 
 void Process_delete(Object* cast) {
@@ -291,6 +151,10 @@ void Process_delete(Object* cast) {
 #ifdef HAVE_CGROUP
    free(this->cgroup);
 #endif
+#ifdef HAVE_OPENVZ
+   free(this->ctid);
+#endif
+   free(this->secattr);
    free(this->ttyDevice);
    free(this);
 }
@@ -303,7 +167,12 @@ effort class. The priority within the best effort class will  be
 dynamically  derived  from  the  cpu  nice level of the process:
 io_priority = (cpu_nice + 20) / 5. -- From ionice(1) man page
 */
-#define LinuxProcess_effectiveIOPriority(p_) (IOPriority_class(p_->ioPriority) == IOPRIO_CLASS_NONE ? IOPriority_tuple(IOPRIO_CLASS_BE, (p_->super.nice + 20) / 5) : p_->ioPriority)
+static int LinuxProcess_effectiveIOPriority(const LinuxProcess* this) {
+   if (IOPriority_class(this->ioPriority) == IOPRIO_CLASS_NONE)
+      return IOPriority_tuple(IOPRIO_CLASS_BE, (this->super.nice + 20) / 5);
+
+   return this->ioPriority;
+}
 
 IOPriority LinuxProcess_updateIOPriority(LinuxProcess* this) {
    IOPriority ioprio = 0;
@@ -315,17 +184,17 @@ IOPriority LinuxProcess_updateIOPriority(LinuxProcess* this) {
    return ioprio;
 }
 
-bool LinuxProcess_setIOPriority(LinuxProcess* this, Arg ioprio) {
+bool LinuxProcess_setIOPriority(Process* this, Arg ioprio) {
 // Other OSes masquerading as Linux (NetBSD?) don't have this syscall
 #ifdef SYS_ioprio_set
-   syscall(SYS_ioprio_set, IOPRIO_WHO_PROCESS, this->super.pid, ioprio.i);
+   syscall(SYS_ioprio_set, IOPRIO_WHO_PROCESS, this->pid, ioprio.i);
 #endif
-   return (LinuxProcess_updateIOPriority(this) == ioprio.i);
+   return (LinuxProcess_updateIOPriority((LinuxProcess*)this) == ioprio.i);
 }
 
 #ifdef HAVE_DELAYACCT
 void LinuxProcess_printDelay(float delay_percent, char* buffer, int n) {
-  if (delay_percent == -1LL) {
+  if (isnan(delay_percent)) {
     xSnprintf(buffer, n, " N/A  ");
   } else {
     xSnprintf(buffer, n, "%4.1f  ", delay_percent);
@@ -333,8 +202,8 @@ void LinuxProcess_printDelay(float delay_percent, char* buffer, int n) {
 }
 #endif
 
-void LinuxProcess_writeField(Process* this, RichString* str, ProcessField field) {
-   LinuxProcess* lp = (LinuxProcess*) this;
+void LinuxProcess_writeField(const Process* this, RichString* str, ProcessField field) {
+   const LinuxProcess* lp = (const LinuxProcess*) this;
    bool coloring = this->settings->highlightMegabytes;
    char buffer[256]; buffer[255] = '\0';
    int attr = CRT_colors[DEFAULT_COLOR];
@@ -351,11 +220,11 @@ void LinuxProcess_writeField(Process* this, RichString* str, ProcessField field)
    }
    case CMINFLT: Process_colorNumber(str, lp->cminflt, coloring); return;
    case CMAJFLT: Process_colorNumber(str, lp->cmajflt, coloring); return;
-   case M_DRS: Process_humanNumber(str, lp->m_drs * PAGE_SIZE_KB, coloring); return;
-   case M_DT: Process_humanNumber(str, lp->m_dt * PAGE_SIZE_KB, coloring); return;
-   case M_LRS: Process_humanNumber(str, lp->m_lrs * PAGE_SIZE_KB, coloring); return;
-   case M_TRS: Process_humanNumber(str, lp->m_trs * PAGE_SIZE_KB, coloring); return;
-   case M_SHARE: Process_humanNumber(str, lp->m_share * PAGE_SIZE_KB, coloring); return;
+   case M_DRS: Process_humanNumber(str, lp->m_drs * CRT_pageSizeKB, coloring); return;
+   case M_DT: Process_humanNumber(str, lp->m_dt * CRT_pageSizeKB, coloring); return;
+   case M_LRS: Process_humanNumber(str, lp->m_lrs * CRT_pageSizeKB, coloring); return;
+   case M_TRS: Process_humanNumber(str, lp->m_trs * CRT_pageSizeKB, coloring); return;
+   case M_SHARE: Process_humanNumber(str, lp->m_share * CRT_pageSizeKB, coloring); return;
    case M_PSS: Process_humanNumber(str, lp->m_pss, coloring); return;
    case M_SWAP: Process_humanNumber(str, lp->m_swap, coloring); return;
    case M_PSSWP: Process_humanNumber(str, lp->m_psswp, coloring); return;
@@ -363,13 +232,6 @@ void LinuxProcess_writeField(Process* this, RichString* str, ProcessField field)
    case STIME: Process_printTime(str, lp->stime); return;
    case CUTIME: Process_printTime(str, lp->cutime); return;
    case CSTIME: Process_printTime(str, lp->cstime); return;
-   case STARTTIME: {
-     struct tm date;
-     time_t starttimewall = btime + (lp->starttime / sysconf(_SC_CLK_TCK));
-     (void) localtime_r(&starttimewall, &date);
-     strftime(buffer, n, ((starttimewall > time(NULL) - 86400) ? "%R " : "%b%d "), &date);
-     break;
-   }
    #ifdef HAVE_TASKSTATS
    case RCHAR:  Process_colorNumber(str, lp->io_rchar, coloring); return;
    case WCHAR:  Process_colorNumber(str, lp->io_wchar, coloring); return;
@@ -381,23 +243,29 @@ void LinuxProcess_writeField(Process* this, RichString* str, ProcessField field)
    case IO_READ_RATE:  Process_outputRate(str, buffer, n, lp->io_rate_read_bps, coloring); return;
    case IO_WRITE_RATE: Process_outputRate(str, buffer, n, lp->io_rate_write_bps, coloring); return;
    case IO_RATE: {
-      double totalRate = (lp->io_rate_read_bps != -1)
-                       ? (lp->io_rate_read_bps + lp->io_rate_write_bps)
-                       : -1;
+      double totalRate = NAN;
+      if(!isnan(lp->io_rate_read_bps) && !isnan(lp->io_rate_write_bps))
+         totalRate = lp->io_rate_read_bps + lp->io_rate_write_bps;
+      else if(!isnan(lp->io_rate_read_bps))
+         totalRate = lp->io_rate_read_bps;
+      else if(!isnan(lp->io_rate_write_bps))
+         totalRate = lp->io_rate_write_bps;
+      else
+         totalRate = NAN;
       Process_outputRate(str, buffer, n, totalRate, coloring); return;
    }
    #endif
    #ifdef HAVE_OPENVZ
-   case CTID: xSnprintf(buffer, n, "%7u ", lp->ctid); break;
+   case CTID: xSnprintf(buffer, n, "%-8s ", lp->ctid ? lp->ctid : ""); break;
    case VPID: xSnprintf(buffer, n, Process_pidFormat, lp->vpid); break;
    #endif
    #ifdef HAVE_VSERVER
    case VXID: xSnprintf(buffer, n, "%5u ", lp->vxid); break;
    #endif
    #ifdef HAVE_CGROUP
-   case CGROUP: xSnprintf(buffer, n, "%-10s ", lp->cgroup); break;
+   case CGROUP: xSnprintf(buffer, n, "%-10s ", lp->cgroup ? lp->cgroup : ""); break;
    #endif
-   case OOM: xSnprintf(buffer, n, Process_pidFormat, lp->oom); break;
+   case OOM: xSnprintf(buffer, n, "%4u ", lp->oom); break;
    case IO_PRIORITY: {
       int klass = IOPriority_class(lp->ioPriority);
       if (klass == IOPRIO_CLASS_NONE) {
@@ -421,22 +289,28 @@ void LinuxProcess_writeField(Process* this, RichString* str, ProcessField field)
    case PERCENT_IO_DELAY: LinuxProcess_printDelay(lp->blkio_delay_percent, buffer, n); break;
    case PERCENT_SWAP_DELAY: LinuxProcess_printDelay(lp->swapin_delay_percent, buffer, n); break;
    #endif
+   case CTXT:
+      if (lp->ctxt_diff > 1000)
+         attr |= A_BOLD;
+      xSnprintf(buffer, n, "%5lu ", lp->ctxt_diff);
+      break;
+   case SECATTR: snprintf(buffer, n, "%-30s   ", lp->secattr ? lp->secattr : "?"); break;
    default:
-      Process_writeField((Process*)this, str, field);
+      Process_writeField(this, str, field);
       return;
    }
    RichString_append(str, attr, buffer);
 }
 
 long LinuxProcess_compare(const void* v1, const void* v2) {
-   LinuxProcess *p1, *p2;
-   Settings *settings = ((Process*)v1)->settings;
+   const LinuxProcess *p1, *p2;
+   const Settings *settings = ((const Process*)v1)->settings;
    if (settings->direction == 1) {
-      p1 = (LinuxProcess*)v1;
-      p2 = (LinuxProcess*)v2;
+      p1 = (const LinuxProcess*)v1;
+      p2 = (const LinuxProcess*)v2;
    } else {
-      p2 = (LinuxProcess*)v1;
-      p1 = (LinuxProcess*)v2;
+      p2 = (const LinuxProcess*)v1;
+      p1 = (const LinuxProcess*)v2;
    }
    long long diff;
    switch ((int)settings->sortKey) {
@@ -460,12 +334,6 @@ long LinuxProcess_compare(const void* v1, const void* v2) {
    case CUTIME: diff = p2->cutime - p1->cutime; goto test_diff;
    case STIME:  diff = p2->stime - p1->stime; goto test_diff;
    case CSTIME: diff = p2->cstime - p1->cstime; goto test_diff;
-   case STARTTIME: {
-      if (p1->starttime == p2->starttime)
-         return (p1->super.pid - p2->super.pid);
-      else
-         return (p1->starttime - p2->starttime);
-   }
    #ifdef HAVE_TASKSTATS
    case RCHAR:  diff = p2->io_rchar - p1->io_rchar; goto test_diff;
    case WCHAR:  diff = p2->io_wchar - p1->io_wchar; goto test_diff;
@@ -480,7 +348,7 @@ long LinuxProcess_compare(const void* v1, const void* v2) {
    #endif
    #ifdef HAVE_OPENVZ
    case CTID:
-      return (p2->ctid - p1->ctid);
+      return strcmp(p1->ctid ? p1->ctid : "", p2->ctid ? p2->ctid : "");
    case VPID:
       return (p2->vpid - p1->vpid);
    #endif
@@ -493,7 +361,7 @@ long LinuxProcess_compare(const void* v1, const void* v2) {
       return strcmp(p1->cgroup ? p1->cgroup : "", p2->cgroup ? p2->cgroup : "");
    #endif
    case OOM:
-      return (p2->oom - p1->oom);
+      return ((int)p2->oom - (int)p1->oom);
    #ifdef HAVE_DELAYACCT
    case PERCENT_CPU_DELAY:
       return (p2->cpu_delay_percent > p1->cpu_delay_percent ? 1 : -1);
@@ -504,6 +372,10 @@ long LinuxProcess_compare(const void* v1, const void* v2) {
    #endif
    case IO_PRIORITY:
       return LinuxProcess_effectiveIOPriority(p1) - LinuxProcess_effectiveIOPriority(p2);
+   case CTXT:
+      return ((long)p2->ctxt_diff - (long)p1->ctxt_diff);
+   case SECATTR:
+      return strcmp(p1->secattr ? p1->secattr : "", p2->secattr ? p2->secattr : "");
    default:
       return Process_compare(v1, v2);
    }
@@ -511,7 +383,6 @@ long LinuxProcess_compare(const void* v1, const void* v2) {
    return (diff > 0) ? 1 : (diff < 0 ? -1 : 0);
 }
 
-bool Process_isThread(Process* this) {
+bool Process_isThread(const Process* this) {
    return (Process_isUserlandThread(this) || Process_isKernelThread(this));
 }
-

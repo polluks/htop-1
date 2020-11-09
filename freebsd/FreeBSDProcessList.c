@@ -1,72 +1,38 @@
 /*
 htop - FreeBSDProcessList.c
 (C) 2014 Hisham H. Muhammad
-Released under the GNU GPL, see the COPYING file
+Released under the GNU GPLv2, see the COPYING file
 in the source distribution for its full text.
 */
 
-#include "ProcessList.h"
 #include "FreeBSDProcessList.h"
-#include "FreeBSDProcess.h"
 
-#include <unistd.h>
-#include <stdlib.h>
-#include <sys/types.h>
-#include <sys/sysctl.h>
-#include <sys/user.h>
+#include <assert.h>
+#include <dirent.h>
 #include <err.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <sys/sysctl.h>
+#include <sys/types.h>
+#include <sys/user.h>
 
-/*{
+#include "Compat.h"
+#include "CRT.h"
+#include "FreeBSDProcess.h"
+#include "Macros.h"
+#include "ProcessList.h"
+#include "XUtils.h"
+#include "zfs/ZfsArcStats.h"
+#include "zfs/openzfs_sysctl.h"
 
-#include <kvm.h>
-#include <sys/param.h>
-#include <sys/jail.h>
-#include <sys/uio.h>
-#include <sys/resource.h>
 
-#define JAIL_ERRMSGLEN	1024
 char jail_errmsg[JAIL_ERRMSGLEN];
-
-typedef struct CPUData_ {
-
-   double userPercent;
-   double nicePercent;
-   double systemPercent;
-   double irqPercent;
-   double idlePercent;
-   double systemAllPercent;
-
-} CPUData;
-
-typedef struct FreeBSDProcessList_ {
-   ProcessList super;
-   kvm_t* kd;
-
-   int zfsArcEnabled;
-
-   unsigned long long int memWire;
-   unsigned long long int memActive;
-   unsigned long long int memInactive;
-   unsigned long long int memFree;
-   unsigned long long int memZfsArc;
-
-
-   CPUData* cpus;
-
-   unsigned long   *cp_time_o;
-   unsigned long   *cp_time_n;
-
-   unsigned long  *cp_times_o;
-   unsigned long  *cp_times_n;
-
-} FreeBSDProcessList;
-
-}*/
-
 
 static int MIB_hw_physmem[2];
 static int MIB_vm_stats_vm_v_page_count[4];
@@ -81,18 +47,16 @@ static int MIB_vm_stats_vm_v_free_count[4];
 
 static int MIB_vfs_bufspace[2];
 
-static int MIB_kstat_zfs_misc_arcstats_size[5];
-
 static int MIB_kern_cp_time[2];
 static int MIB_kern_cp_times[2];
 static int kernelFScale;
 
-ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* pidWhiteList, uid_t userId) {
+ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* pidMatchList, uid_t userId) {
    size_t len;
    char errbuf[_POSIX2_LINE_MAX];
    FreeBSDProcessList* fpl = xCalloc(1, sizeof(FreeBSDProcessList));
    ProcessList* pl = (ProcessList*) fpl;
-   ProcessList_init(pl, Class(FreeBSDProcess), usersTable, pidWhiteList, userId);
+   ProcessList_init(pl, Class(FreeBSDProcess), usersTable, pidMatchList, userId);
 
    // physical memory in system: hw.physmem
    // physical page size: hw.pagesize
@@ -101,8 +65,8 @@ ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* pidWhiteList, ui
 
    len = sizeof(pageSize);
    if (sysctlbyname("vm.stats.vm.v_page_size", &pageSize, &len, NULL, 0) == -1) {
-      pageSize = PAGE_SIZE;
-      pageSizeKb = PAGE_SIZE_KB;
+      pageSize = CRT_pageSize;
+      pageSizeKb = CRT_pageSize;
    } else {
       pageSizeKb = pageSize / ONE_K;
    }
@@ -119,15 +83,8 @@ ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* pidWhiteList, ui
 
    len = 2; sysctlnametomib("vfs.bufspace", MIB_vfs_bufspace, &len);
 
-   len = sizeof(fpl->memZfsArc);
-   if (sysctlbyname("kstat.zfs.misc.arcstats.size", &fpl->memZfsArc, &len,
-	    NULL, 0) == 0 && fpl->memZfsArc != 0) {
-      sysctlnametomib("kstat.zfs.misc.arcstats.size", MIB_kstat_zfs_misc_arcstats_size, &len);
-		  fpl->zfsArcEnabled = 1;
-   } else {
-		  fpl->zfsArcEnabled = 0;
-   }
-
+   openzfs_sysctl_init(&fpl->zfs);
+   openzfs_sysctl_updateArcStats(&fpl->zfs);
 
    int smp = 0;
    len = sizeof(smp);
@@ -164,7 +121,7 @@ ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* pidWhiteList, ui
       sysctl(MIB_kern_cp_times, 2, fpl->cp_times_o, &len, NULL, 0);
    }
 
-   pl->cpuCount = MAX(cpus, 1);
+   pl->cpuCount = MAXIMUM(cpus, 1);
 
    if (cpus == 1 ) {
      fpl->cpus = xRealloc(fpl->cpus, sizeof(CPUData));
@@ -185,11 +142,16 @@ ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* pidWhiteList, ui
       errx(1, "kvm_open: %s", errbuf);
    }
 
+   fpl->ttys = Hashtable_new(20, true);
+
    return pl;
 }
 
 void ProcessList_delete(ProcessList* this) {
    const FreeBSDProcessList* fpl = (FreeBSDProcessList*) this;
+
+   Hashtable_delete(fpl->ttys);
+
    if (fpl->kd) kvm_close(fpl->kd);
 
    free(fpl->cp_time_o);
@@ -300,7 +262,6 @@ static inline void FreeBSDProcessList_scanMemoryInfo(ProcessList* pl) {
    u_long totalMem;
    u_int memActive, memWire, cachedMem;
    long buffersMem;
-   uint64_t memZfsArc;
    size_t len;
 
    //disabled for now, as it is always smaller than phycal amount of memory...
@@ -332,15 +293,9 @@ static inline void FreeBSDProcessList_scanMemoryInfo(ProcessList* pl) {
    cachedMem *= pageSizeKb;
    pl->cachedMem = cachedMem;
 
-   if (fpl->zfsArcEnabled) {
-      len = sizeof(memZfsArc);
-      sysctl(MIB_kstat_zfs_misc_arcstats_size, 5, &(memZfsArc), &len , NULL, 0);
-      memZfsArc /= 1024;
-      fpl->memZfsArc = memZfsArc;
-      fpl->memWire -= fpl->memZfsArc;
-      pl->cachedMem += fpl->memZfsArc;
-      // maybe when we learn how to make custom memory meter
-      // we could do custom arc breakdown?
+   if (fpl->zfs.enabled) {
+      fpl->memWire -= fpl->zfs.size;
+      pl->cachedMem += fpl->zfs.size;
    }
 
    pl->usedMem = fpl->memActive + fpl->memWire;
@@ -352,7 +307,7 @@ static inline void FreeBSDProcessList_scanMemoryInfo(ProcessList* pl) {
    //pl->freeMem *= pageSizeKb;
 
    struct kvm_swap swap[16];
-   int nswap = kvm_getswapinfo(fpl->kd, swap, sizeof(swap)/sizeof(swap[0]), 0);
+   int nswap = kvm_getswapinfo(fpl->kd, swap, ARRAYSIZE(swap), 0);
    pl->totalSwap = 0;
    pl->usedSwap = 0;
    for (int i = 0; i < nswap; i++) {
@@ -365,7 +320,71 @@ static inline void FreeBSDProcessList_scanMemoryInfo(ProcessList* pl) {
    pl->sharedMem = 0;  // currently unused
 }
 
-char* FreeBSDProcessList_readProcessName(kvm_t* kd, struct kinfo_proc* kproc, int* basenameEnd) {
+static void FreeBSDProcessList_scanTTYs(ProcessList* pl) {
+   FreeBSDProcessList* fpl = (FreeBSDProcessList*) pl;
+
+   // scan /dev/tty*
+   {
+      DIR* dirPtr = opendir("/dev");
+      if (!dirPtr)
+         return;
+
+      int dirFd = dirfd(dirPtr);
+      if (dirFd < 0)
+         goto err1;
+
+      const struct dirent* entry;
+      while ((entry = readdir(dirPtr))) {
+         if (!String_startsWith(entry->d_name, "tty"))
+            continue;
+
+         struct stat info;
+         if (Compat_fstatat(dirFd, "/dev", entry->d_name, &info, 0) < 0)
+            continue;
+
+         if (!S_ISCHR(info.st_mode))
+            continue;
+
+         if (!Hashtable_get(fpl->ttys, info.st_rdev))
+            Hashtable_put(fpl->ttys, info.st_rdev, xStrdup(entry->d_name));
+      }
+
+err1:
+      closedir(dirPtr);
+   }
+
+   // scan /dev/pts/*
+   {
+      DIR* dirPtr = opendir("/dev/pts");
+      if (!dirPtr)
+         return;
+
+      int dirFd = dirfd(dirPtr);
+      if (dirFd < 0)
+         goto err2;
+
+      const struct dirent* entry;
+      while ((entry = readdir(dirPtr))) {
+         struct stat info;
+         if (Compat_fstatat(dirFd, "/dev/pts", entry->d_name, &info, 0) < 0)
+            continue;
+
+         if (!S_ISCHR(info.st_mode))
+            continue;
+
+         if (!Hashtable_get(fpl->ttys, info.st_rdev)) {
+            char* path;
+            xAsprintf(&path, "pts/%s", entry->d_name);
+            Hashtable_put(fpl->ttys, info.st_rdev, path);
+         }
+      }
+
+err2:
+      closedir(dirPtr);
+   }
+}
+
+static char* FreeBSDProcessList_readProcessName(kvm_t* kd, const struct kinfo_proc* kproc, int* basenameEnd) {
    char** argv = kvm_getargv(kd, kproc, 0);
    if (!argv) {
       return xStrdup(kproc->ki_comm);
@@ -390,7 +409,7 @@ char* FreeBSDProcessList_readProcessName(kvm_t* kd, struct kinfo_proc* kproc, in
    return comm;
 }
 
-char* FreeBSDProcessList_readJailName(struct kinfo_proc* kproc) {
+static char* FreeBSDProcessList_readJailName(const struct kinfo_proc* kproc) {
    int    jid;
    struct iovec jiov[6];
    char*  jname;
@@ -398,9 +417,10 @@ char* FreeBSDProcessList_readJailName(struct kinfo_proc* kproc) {
 
    if (kproc->ki_jid != 0 ){
       memset(jnamebuf, 0, sizeof(jnamebuf));
+IGNORE_WCASTQUAL_BEGIN
       *(const void **)&jiov[0].iov_base = "jid";
       jiov[0].iov_len = sizeof("jid");
-      jiov[1].iov_base = &kproc->ki_jid;
+      jiov[1].iov_base = (void*) &kproc->ki_jid;
       jiov[1].iov_len = sizeof(kproc->ki_jid);
       *(const void **)&jiov[2].iov_base = "name";
       jiov[2].iov_len = sizeof("name");
@@ -410,12 +430,13 @@ char* FreeBSDProcessList_readJailName(struct kinfo_proc* kproc) {
       jiov[4].iov_len = sizeof("errmsg");
       jiov[5].iov_base = jail_errmsg;
       jiov[5].iov_len = JAIL_ERRMSGLEN;
+IGNORE_WCASTQUAL_END
       jail_errmsg[0] = 0;
       jid = jail_get(jiov, 6, 0);
       if (jid < 0) {
          if (!jail_errmsg[0])
             xSnprintf(jail_errmsg, JAIL_ERRMSGLEN, "jail_get: %s", strerror(errno));
-            return NULL;
+         return NULL;
       } else if (jid == kproc->ki_jid) {
          jname = xStrdup(jnamebuf);
          if (jname == NULL)
@@ -432,31 +453,34 @@ char* FreeBSDProcessList_readJailName(struct kinfo_proc* kproc) {
    return jname;
 }
 
-void ProcessList_goThroughEntries(ProcessList* this) {
-   FreeBSDProcessList* fpl = (FreeBSDProcessList*) this;
-   Settings* settings = this->settings;
+void ProcessList_goThroughEntries(ProcessList* super, bool pauseProcessUpdate) {
+   FreeBSDProcessList* fpl = (FreeBSDProcessList*) super;
+   const Settings* settings = super->settings;
    bool hideKernelThreads = settings->hideKernelThreads;
    bool hideUserlandThreads = settings->hideUserlandThreads;
 
-   FreeBSDProcessList_scanMemoryInfo(this);
-   FreeBSDProcessList_scanCPUTime(this);
+   openzfs_sysctl_updateArcStats(&fpl->zfs);
+   FreeBSDProcessList_scanMemoryInfo(super);
+   FreeBSDProcessList_scanCPUTime(super);
 
-   int cpus = this->cpuCount;
+   // in pause mode only gather global data for meters (CPU/memory/...)
+   if (pauseProcessUpdate)
+      return;
+
+   if (settings->flags & PROCESS_FLAG_FREEBSD_TTY)
+      FreeBSDProcessList_scanTTYs(super);
+
    int count = 0;
    struct kinfo_proc* kprocs = kvm_getprocs(fpl->kd, KERN_PROC_PROC, 0, &count);
-
-   struct timeval tv;
-   gettimeofday(&tv, NULL);
 
    for (int i = 0; i < count; i++) {
       struct kinfo_proc* kproc = &kprocs[i];
       bool preExisting = false;
-      bool isIdleProcess = false;
-      struct tm date;
-      Process* proc = ProcessList_getProcess(this, kproc->ki_pid, &preExisting, (Process_New) FreeBSDProcess_new);
+      // TODO: bool isIdleProcess = false;
+      Process* proc = ProcessList_getProcess(super, kproc->ki_pid, &preExisting, FreeBSDProcess_new);
       FreeBSDProcess* fp = (FreeBSDProcess*) proc;
 
-      proc->show = ! ((hideKernelThreads && Process_isKernelThread(fp)) || (hideUserlandThreads && Process_isUserlandThread(proc)));
+      proc->show = ! ((hideKernelThreads && Process_isKernelThread(proc)) || (hideUserlandThreads && Process_isUserlandThread(proc)));
 
       if (!preExisting) {
          fp->jid = kproc->ki_jid;
@@ -469,12 +493,12 @@ void ProcessList_goThroughEntries(ProcessList* this) {
          proc->tpgid = kproc->ki_tpgid;
          proc->tgid = kproc->ki_pid;
          proc->session = kproc->ki_sid;
-         proc->tty_nr = kproc->ki_tdev;
          proc->pgrp = kproc->ki_pgid;
          proc->st_uid = kproc->ki_uid;
          proc->starttime_ctime = kproc->ki_start.tv_sec;
-         proc->user = UsersTable_getRef(this->usersTable, proc->st_uid);
-         ProcessList_add((ProcessList*)this, proc);
+         Process_fillStarttimeBuffer(proc);
+         proc->user = UsersTable_getRef(super->usersTable, proc->st_uid);
+         ProcessList_add(super, proc);
          proc->comm = FreeBSDProcessList_readProcessName(fpl->kd, kproc, &proc->basenameOffset);
          fp->jname = FreeBSDProcessList_readJailName(kproc);
       } else {
@@ -491,7 +515,7 @@ void ProcessList_goThroughEntries(ProcessList* this) {
          if(proc->st_uid != kproc->ki_uid) {
             // some processes change users (eg. to lower privs)
             proc->st_uid = kproc->ki_uid;
-            proc->user = UsersTable_getRef(this->usersTable, proc->st_uid);
+            proc->user = UsersTable_getRef(super->usersTable, proc->st_uid);
          }
          if (settings->updateProcessNames) {
             free(proc->comm);
@@ -502,19 +526,21 @@ void ProcessList_goThroughEntries(ProcessList* this) {
       // from FreeBSD source /src/usr.bin/top/machine.c
       proc->m_size = kproc->ki_size / 1024 / pageSizeKb;
       proc->m_resident = kproc->ki_rssize;
-      proc->percent_mem = (proc->m_resident * PAGE_SIZE_KB) / (double)(this->totalMem) * 100.0;
       proc->nlwp = kproc->ki_numthreads;
       proc->time = (kproc->ki_runtime + 5000) / 10000;
 
       proc->percent_cpu = 100.0 * ((double)kproc->ki_pctcpu / (double)kernelFScale);
-      proc->percent_mem = 100.0 * (proc->m_resident * PAGE_SIZE_KB) / (double)(this->totalMem);
+      proc->percent_mem = 100.0 * (proc->m_resident * pageSizeKb) / (double)(super->totalMem);
 
-      if (proc->percent_cpu > 0.1) {
-         // system idle process should own all CPU time left regardless of CPU count
-         if ( strcmp("idle", kproc->ki_comm) == 0 ) {
-            isIdleProcess = true;
-         }
-      }
+      /*
+       * TODO
+       * if (proc->percent_cpu > 0.1) {
+       *     // system idle process should own all CPU time left regardless of CPU count
+       *     if ( strcmp("idle", kproc->ki_comm) == 0 ) {
+       *         isIdleProcess = true;
+       *     }
+       * }
+       */
 
       proc->priority = kproc->ki_pri.pri_level - PZERO;
 
@@ -539,16 +565,15 @@ void ProcessList_goThroughEntries(ProcessList* this) {
       default:     proc->state = '?';
       }
 
-      if (Process_isKernelThread(fp)) {
-         this->kernelThreads++;
-      }
+      if (settings->flags & PROCESS_FLAG_FREEBSD_TTY)
+         fp->ttyPath = (kproc->ki_tdev == NODEV) ? nodevStr : Hashtable_get(fpl->ttys, kproc->ki_tdev);
 
-      (void) localtime_r((time_t*) &proc->starttime_ctime, &date);
-      strftime(proc->starttime_show, 7, ((proc->starttime_ctime > tv.tv_sec - 86400) ? "%R " : "%b%d "), &date);
+      if (Process_isKernelThread(proc))
+         super->kernelThreads++;
 
-      this->totalTasks++;
+      super->totalTasks++;
       if (proc->state == 'R')
-         this->runningTasks++;
+         super->runningTasks++;
       proc->updated = true;
    }
 }

@@ -1,31 +1,22 @@
 /*
 htop - SignalsPanel.c
 (C) 2004-2011 Hisham H. Muhammad
-Released under the GNU GPL, see the COPYING file
+Released under the GNU GPLv2, see the COPYING file
 in the source distribution for its full text.
 */
 
-#include "Panel.h"
 #include "SignalsPanel.h"
-#include "Platform.h"
 
-#include "ListItem.h"
-#include "RichString.h"
-
-#include <stdlib.h>
-#include <assert.h>
 #include <signal.h>
+#include <stdbool.h>
 
-#include <ctype.h>
+#include "FunctionBar.h"
+#include "ListItem.h"
+#include "Object.h"
+#include "Panel.h"
+#include "Platform.h"
+#include "XUtils.h"
 
-/*{
-
-typedef struct SignalItem_ {
-   const char* name;
-   int number;
-} SignalItem;
-
-}*/
 
 Panel* SignalsPanel_new() {
    Panel* this = Panel_new(1, 1, 1, 1, true, Class(ListItem), FunctionBar_newEnterEsc("Send   ", "Cancel "));

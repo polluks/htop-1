@@ -2,7 +2,7 @@
 htop - OpenBSDProcess.c
 (C) 2015 Hisham H. Muhammad
 (C) 2015 Michael McConville
-Released under the GNU GPL, see the COPYING file
+Released under the GNU GPLv2, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -16,35 +16,15 @@ in the source distribution for its full text.
 #include <unistd.h>
 #include <sys/syscall.h>
 
-/*{
 
-typedef enum OpenBSDProcessFields {
-   // Add platform-specific fields here, with ids >= 100
-   LAST_PROCESSFIELD = 100,
-} OpenBSDProcessField;
-
-typedef struct OpenBSDProcess_ {
-   Process super;
-} OpenBSDProcess;
-
-#ifndef Process_isKernelThread
-#define Process_isKernelThread(_process) (_process->pgrp == 0)
-#endif
-
-#ifndef Process_isUserlandThread
-#define Process_isUserlandThread(_process) (_process->pid != _process->tgid)
-#endif
-
-}*/
-
-ProcessClass OpenBSDProcess_class = {
+const ProcessClass OpenBSDProcess_class = {
    .super = {
       .extends = Class(Process),
       .display = Process_display,
       .delete = Process_delete,
       .compare = OpenBSDProcess_compare
    },
-   .writeField = (Process_WriteField) OpenBSDProcess_writeField,
+   .writeField = OpenBSDProcess_writeField,
 };
 
 ProcessFieldData Process_fields[] = {
@@ -185,11 +165,11 @@ ProcessPidColumn Process_pidColumns[] = {
    { .id = 0, .label = NULL },
 };
 
-OpenBSDProcess* OpenBSDProcess_new(Settings* settings) {
+Process* OpenBSDProcess_new(const Settings* settings) {
    OpenBSDProcess* this = xCalloc(sizeof(OpenBSDProcess), 1);
    Object_setClass(this, Class(OpenBSDProcess));
    Process_init(&this->super, settings);
-   return this;
+   return &this->this;
 }
 
 void Process_delete(Object* cast) {
@@ -198,7 +178,7 @@ void Process_delete(Object* cast) {
    free(this);
 }
 
-void OpenBSDProcess_writeField(Process* this, RichString* str, ProcessField field) {
+void OpenBSDProcess_writeField(const Process* this, RichString* str, ProcessField field) {
    //OpenBSDProcess* fp = (OpenBSDProcess*) this;
    char buffer[256]; buffer[255] = '\0';
    int attr = CRT_colors[DEFAULT_COLOR];
@@ -213,14 +193,14 @@ void OpenBSDProcess_writeField(Process* this, RichString* str, ProcessField fiel
 }
 
 long OpenBSDProcess_compare(const void* v1, const void* v2) {
-   OpenBSDProcess *p1, *p2;
-   Settings *settings = ((Process*)v1)->settings;
+   const OpenBSDProcess *p1, *p2;
+   const Settings *settings = ((const Process*)v1)->settings;
    if (settings->direction == 1) {
-      p1 = (OpenBSDProcess*)v1;
-      p2 = (OpenBSDProcess*)v2;
+      p1 = (const OpenBSDProcess*)v1;
+      p2 = (const OpenBSDProcess*)v2;
    } else {
-      p2 = (OpenBSDProcess*)v1;
-      p1 = (OpenBSDProcess*)v2;
+      p2 = (const OpenBSDProcess*)v1;
+      p1 = (const OpenBSDProcess*)v2;
    }
    switch (settings->sortKey) {
    // add OpenBSD-specific fields here
@@ -229,6 +209,6 @@ long OpenBSDProcess_compare(const void* v1, const void* v2) {
    }
 }
 
-bool Process_isThread(Process* this) {
+bool Process_isThread(const Process* this) {
    return (Process_isKernelThread(this));
 }

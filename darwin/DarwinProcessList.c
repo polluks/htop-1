@@ -1,7 +1,7 @@
 /*
 htop - DarwinProcessList.c
 (C) 2014 Hisham H. Muhammad
-Released under the GNU GPL, see the COPYING file
+Released under the GNU GPLv2, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -9,6 +9,8 @@ in the source distribution for its full text.
 #include "DarwinProcess.h"
 #include "DarwinProcessList.h"
 #include "CRT.h"
+#include "zfs/ZfsArcStats.h"
+#include "zfs/openzfs_sysctl.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -51,25 +53,6 @@ int CompareKernelVersion(short int major, short int minor, short int component) 
     if ( k.version[2] !=  component) return k.version[2] - component;
     return 0;
 }
-
-/*{
-#include "ProcessList.h"
-#include <mach/mach_host.h>
-#include <sys/sysctl.h>
-
-typedef struct DarwinProcessList_ {
-   ProcessList super;
-
-   host_basic_info_data_t host_info;
-   vm_statistics_data_t vm_stats;
-   processor_cpu_load_info_t prev_load;
-   processor_cpu_load_info_t curr_load;
-   uint64_t kernel_threads;
-   uint64_t user_threads;
-   uint64_t global_diff;
-} DarwinProcessList;
-
-}*/
 
 void ProcessList_getHostInfo(host_basic_info_data_t *p) {
    mach_msg_type_number_t info_size = HOST_BASIC_INFO_COUNT;
@@ -131,11 +114,10 @@ struct kinfo_proc *ProcessList_getKInfoProcs(size_t *count) {
    return processes;
 }
 
-
-ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* pidWhiteList, uid_t userId) {
+ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* pidMatchList, uid_t userId) {
    DarwinProcessList* this = xCalloc(1, sizeof(DarwinProcessList));
 
-   ProcessList_init(&this->super, Class(Process), usersTable, pidWhiteList, userId);
+   ProcessList_init(&this->super, Class(Process), usersTable, pidMatchList, userId);
 
    /* Initialize the CPU information */
    this->super.cpuCount = ProcessList_allocateCPULoadInfo(&this->prev_load);
@@ -144,6 +126,10 @@ ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* pidWhiteList, ui
 
    /* Initialize the VM statistics */
    ProcessList_getVMStats(&this->vm_stats);
+
+   /* Initialize the ZFS kstats, if zfs.kext loaded */
+   openzfs_sysctl_init(&this->zfs);
+   openzfs_sysctl_updateArcStats(&this->zfs);
 
    this->super.kernelThreads = 0;
    this->super.userlandThreads = 0;
@@ -158,21 +144,23 @@ void ProcessList_delete(ProcessList* this) {
    free(this);
 }
 
-void ProcessList_goThroughEntries(ProcessList* super) {
+void ProcessList_goThroughEntries(ProcessList* super, bool pauseProcessUpdate) {
     DarwinProcessList *dpl = (DarwinProcessList *)super;
-	bool preExisting = true;
-	struct kinfo_proc *ps;
-	size_t count;
+    bool preExisting = true;
+    struct kinfo_proc *ps;
+    size_t count;
     DarwinProcess *proc;
-    struct timeval tv;
-
-    gettimeofday(&tv, NULL); /* Start processing time */
 
     /* Update the global data (CPU times and VM stats) */
     ProcessList_freeCPULoadInfo(&dpl->prev_load);
     dpl->prev_load = dpl->curr_load;
     ProcessList_allocateCPULoadInfo(&dpl->curr_load);
     ProcessList_getVMStats(&dpl->vm_stats);
+    openzfs_sysctl_updateArcStats(&dpl->zfs);
+
+    // in pause mode only gather global data for meters (CPU/memory/...)
+    if (pauseProcessUpdate)
+       return;
 
     /* Get the time difference */
     dpl->global_diff = 0;
@@ -198,9 +186,9 @@ void ProcessList_goThroughEntries(ProcessList* super) {
     ps = ProcessList_getKInfoProcs(&count);
 
     for(size_t i = 0; i < count; ++i) {
-       proc = (DarwinProcess *)ProcessList_getProcess(super, ps[i].kp_proc.p_pid, &preExisting, (Process_New)DarwinProcess_new);
+       proc = (DarwinProcess *)ProcessList_getProcess(super, ps[i].kp_proc.p_pid, &preExisting, DarwinProcess_new);
 
-       DarwinProcess_setFromKInfoProc(&proc->super, &ps[i], tv.tv_sec, preExisting);
+       DarwinProcess_setFromKInfoProc(&proc->super, &ps[i], preExisting);
        DarwinProcess_setFromLibprocPidinfo(proc, dpl);
 
        // Disabled for High Sierra due to bug in macOS High Sierra

@@ -1,25 +1,20 @@
-#include "EnvScreen.h"
+#include "config.h" // IWYU pragma: keep
 
-#include "config.h"
-#include "CRT.h"
-#include "IncSet.h"
-#include "ListItem.h"
-#include "Platform.h"
-#include "StringUtils.h"
+#include "EnvScreen.h"
 
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
-/*{
-#include "InfoScreen.h"
+#include "CRT.h"
+#include "Macros.h"
+#include "Panel.h"
+#include "Platform.h"
+#include "ProvideCurses.h"
+#include "Vector.h"
+#include "XUtils.h"
 
-typedef struct EnvScreen_ {
-   InfoScreen super;
-} EnvScreen;
-}*/
 
-InfoScreenClass EnvScreen_class = {
+const InfoScreenClass EnvScreen_class = {
    .super = {
       .extends = Class(Object),
       .delete = EnvScreen_delete
@@ -44,7 +39,7 @@ void EnvScreen_draw(InfoScreen* this) {
 
 void EnvScreen_scan(InfoScreen* this) {
    Panel* panel = this->display;
-   int idx = MAX(Panel_getSelectedIndex(panel), 0);
+   int idx = MAXIMUM(Panel_getSelectedIndex(panel), 0);
 
    Panel_prune(panel);
 

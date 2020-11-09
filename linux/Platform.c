@@ -1,48 +1,55 @@
 /*
 htop - linux/Platform.c
 (C) 2014 Hisham H. Muhammad
-Released under the GNU GPL, see the COPYING file
+Released under the GNU GPLv2, see the COPYING file
 in the source distribution for its full text.
 */
 
+#include "config.h"
+
 #include "Platform.h"
+
+#include <assert.h>
+#include <ctype.h>
+#include <math.h>
+#include <stdio.h>
+
+#include "BatteryMeter.h"
+#include "ClockMeter.h"
+#include "CPUMeter.h"
+#include "DateMeter.h"
+#include "DateTimeMeter.h"
+#include "DiskIOMeter.h"
+#include "HostnameMeter.h"
 #include "IOPriority.h"
 #include "IOPriorityPanel.h"
 #include "LinuxProcess.h"
 #include "LinuxProcessList.h"
-#include "Battery.h"
-
+#include "LoadAverageMeter.h"
+#include "Macros.h"
+#include "MainPanel.h"
 #include "Meter.h"
-#include "CPUMeter.h"
 #include "MemoryMeter.h"
+#include "NetworkIOMeter.h"
+#include "Object.h"
+#include "Panel.h"
+#include "PressureStallMeter.h"
+#include "ProcessList.h"
+#include "ProvideCurses.h"
+#include "SELinuxMeter.h"
+#include "Settings.h"
 #include "SwapMeter.h"
 #include "TasksMeter.h"
-#include "LoadAverageMeter.h"
 #include "UptimeMeter.h"
-#include "PressureStallMeter.h"
-#include "ClockMeter.h"
-#include "HostnameMeter.h"
-#include "LinuxProcess.h"
+#include "XUtils.h"
+#include "ZramMeter.h"
 
-#include <math.h>
-#include <assert.h>
-#include <limits.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include "zfs/ZfsArcMeter.h"
+#include "zfs/ZfsArcStats.h"
+#include "zfs/ZfsCompressedArcMeter.h"
 
-/*{
-#include "Action.h"
-#include "MainPanel.h"
-#include "BatteryMeter.h"
-#include "LinuxProcess.h"
-#include "SignalsPanel.h"
-}*/
 
-#ifndef CLAMP
-#define CLAMP(x,low,high) (((x)>(high))?(high):(((x)<(low))?(low):(x)))
-#endif
-
-ProcessField Platform_defaultFields[] = { PID, USER, PRIORITY, NICE, M_SIZE, M_RESIDENT, M_SHARE, STATE, PERCENT_CPU, PERCENT_MEM, TIME, COMM, 0 };
+ProcessField Platform_defaultFields[] = { PID, USER, PRIORITY, NICE, M_SIZE, M_RESIDENT, (int)M_SHARE, STATE, PERCENT_CPU, PERCENT_MEM, TIME, COMM, 0 };
 
 //static ProcessField defaultIoFields[] = { PID, IO_PRIORITY, USER, IO_READ_RATE, IO_WRITE_RATE, IO_RATE, COMM, 0 };
 
@@ -85,19 +92,19 @@ const SignalItem Platform_signals[] = {
    { .name = "31 SIGSYS",    .number = 31 },
 };
 
-const unsigned int Platform_numberOfSignals = sizeof(Platform_signals)/sizeof(SignalItem);
+const unsigned int Platform_numberOfSignals = ARRAYSIZE(Platform_signals);
 
 static Htop_Reaction Platform_actionSetIOPriority(State* st) {
    Panel* panel = st->panel;
 
    LinuxProcess* p = (LinuxProcess*) Panel_getSelected(panel);
    if (!p) return HTOP_OK;
-   IOPriority ioprio = p->ioPriority;
-   Panel* ioprioPanel = IOPriorityPanel_new(ioprio);
+   IOPriority ioprio1 = p->ioPriority;
+   Panel* ioprioPanel = IOPriorityPanel_new(ioprio1);
    void* set = Action_pickFromVector(st, ioprioPanel, 21, true);
    if (set) {
-      IOPriority ioprio = IOPriorityPanel_getIOPriority(ioprioPanel);
-      bool ok = MainPanel_foreachProcess((MainPanel*)panel, (MainPanel_ForeachProcessFn) LinuxProcess_setIOPriority, (Arg){ .i = ioprio }, NULL);
+      IOPriority ioprio2 = IOPriorityPanel_getIOPriority(ioprioPanel);
+      bool ok = MainPanel_foreachProcess((MainPanel*)panel, LinuxProcess_setIOPriority, (Arg){ .i = ioprio2 }, NULL);
       if (!ok)
          beep();
    }
@@ -109,9 +116,11 @@ void Platform_setBindings(Htop_Action* keys) {
    keys['i'] = Platform_actionSetIOPriority;
 }
 
-MeterClass* Platform_meterTypes[] = {
+const MeterClass* const Platform_meterTypes[] = {
    &CPUMeter_class,
    &ClockMeter_class,
+   &DateMeter_class,
+   &DateTimeMeter_class,
    &LoadAverageMeter_class,
    &LoadMeter_class,
    &MemoryMeter_class,
@@ -122,16 +131,28 @@ MeterClass* Platform_meterTypes[] = {
    &HostnameMeter_class,
    &AllCPUsMeter_class,
    &AllCPUs2Meter_class,
+   &AllCPUs4Meter_class,
+   &AllCPUs8Meter_class,
    &LeftCPUsMeter_class,
    &RightCPUsMeter_class,
    &LeftCPUs2Meter_class,
    &RightCPUs2Meter_class,
+   &LeftCPUs4Meter_class,
+   &RightCPUs4Meter_class,
+   &LeftCPUs8Meter_class,
+   &RightCPUs8Meter_class,
    &BlankMeter_class,
    &PressureStallCPUSomeMeter_class,
    &PressureStallIOSomeMeter_class,
    &PressureStallIOFullMeter_class,
    &PressureStallMemorySomeMeter_class,
    &PressureStallMemoryFullMeter_class,
+   &ZfsArcMeter_class,
+   &ZfsCompressedArcMeter_class,
+   &ZramMeter_class,
+   &DiskIOMeter_class,
+   &NetworkIOMeter_class,
+   &SELinuxMeter_class,
    NULL
 };
 
@@ -143,7 +164,7 @@ int Platform_getUptime() {
       fclose(fd);
       if (n <= 0) return 0;
    }
-   return (int) floor(uptime);
+   return floor(uptime);
 }
 
 void Platform_getLoadAverage(double* one, double* five, double* fifteen) {
@@ -170,8 +191,8 @@ int Platform_getMaxPid() {
 }
 
 double Platform_setCPUValues(Meter* this, int cpu) {
-   LinuxProcessList* pl = (LinuxProcessList*) this->pl;
-   CPUData* cpuData = &(pl->cpus[cpu]);
+   const LinuxProcessList* pl = (const LinuxProcessList*) this->pl;
+   const CPUData* cpuData = &(pl->cpus[cpu]);
    double total = (double) ( cpuData->totalPeriod == 0 ? 1 : cpuData->totalPeriod);
    double percent;
    double* v = this->values;
@@ -184,7 +205,7 @@ double Platform_setCPUValues(Meter* this, int cpu) {
       v[CPU_METER_STEAL]   = cpuData->stealPeriod / total * 100.0;
       v[CPU_METER_GUEST]   = cpuData->guestPeriod / total * 100.0;
       v[CPU_METER_IOWAIT]  = cpuData->ioWaitPeriod / total * 100.0;
-      Meter_setItems(this, 8);
+      this->curItems = 8;
       if (this->pl->settings->accountGuestInCPUMeter) {
          percent = v[0]+v[1]+v[2]+v[3]+v[4]+v[5]+v[6];
       } else {
@@ -193,7 +214,7 @@ double Platform_setCPUValues(Meter* this, int cpu) {
    } else {
       v[2] = cpuData->systemAllPeriod / total * 100.0;
       v[3] = (cpuData->stealPeriod + cpuData->guestPeriod) / total * 100.0;
-      Meter_setItems(this, 4);
+      this->curItems = 4;
       percent = v[0]+v[1]+v[2]+v[3];
    }
    percent = CLAMP(percent, 0.0, 100.0);
@@ -205,7 +226,9 @@ double Platform_setCPUValues(Meter* this, int cpu) {
 }
 
 void Platform_setMemoryValues(Meter* this) {
-   ProcessList* pl = (ProcessList*) this->pl;
+   const ProcessList* pl = this->pl;
+   const LinuxProcessList* lpl = (const LinuxProcessList*) pl;
+
    long int usedMem = pl->usedMem;
    long int buffersMem = pl->buffersMem;
    long int cachedMem = pl->cachedMem;
@@ -214,36 +237,70 @@ void Platform_setMemoryValues(Meter* this) {
    this->values[0] = usedMem;
    this->values[1] = buffersMem;
    this->values[2] = cachedMem;
+
+   if (lpl->zfs.enabled != 0) {
+      this->values[0] -= lpl->zfs.size;
+      this->values[2] += lpl->zfs.size;
+   }
 }
 
 void Platform_setSwapValues(Meter* this) {
-   ProcessList* pl = (ProcessList*) this->pl;
+   const ProcessList* pl = this->pl;
    this->total = pl->totalSwap;
    this->values[0] = pl->usedSwap;
 }
 
+void Platform_setZramValues(Meter* this) {
+   const LinuxProcessList* lpl = (const LinuxProcessList*) this->pl;
+   this->total = lpl->zram.totalZram;
+   this->values[0] = lpl->zram.usedZramComp;
+   this->values[1] = lpl->zram.usedZramOrig;
+}
+
+void Platform_setZfsArcValues(Meter* this) {
+   const LinuxProcessList* lpl = (const LinuxProcessList*) this->pl;
+
+   ZfsArcMeter_readStats(this, &(lpl->zfs));
+}
+
+void Platform_setZfsCompressedArcValues(Meter* this) {
+   const LinuxProcessList* lpl = (const LinuxProcessList*) this->pl;
+
+   ZfsCompressedArcMeter_readStats(this, &(lpl->zfs));
+}
 char* Platform_getProcessEnv(pid_t pid) {
-   char procname[32+1];
-   xSnprintf(procname, 32, "/proc/%d/environ", pid);
+   char procname[128];
+   xSnprintf(procname, sizeof(procname), PROCDIR "/%d/environ", pid);
    FILE* fd = fopen(procname, "r");
+   if(!fd)
+      return NULL;
+
    char *env = NULL;
-   if (fd) {
-      size_t capacity = 4096, size = 0, bytes;
-      env = xMalloc(capacity);
-      while (env && (bytes = fread(env+size, 1, capacity-size, fd)) > 0) {
-         size += bytes;
-         capacity *= 2;
-         env = xRealloc(env, capacity);
-      }
-      fclose(fd);
-      if (size < 2 || env[size-1] || env[size-2]) {
-         if (size + 2 < capacity) {
-            env = xRealloc(env, capacity+2);
-         }
-         env[size] = 0;
-         env[size+1] = 0;
-      }
+
+   size_t capacity = 0;
+   size_t size = 0;
+   ssize_t bytes = 0;
+
+   do {
+      size += bytes;
+      capacity += 4096;
+      env = xRealloc(env, capacity);
+   } while ((bytes = fread(env + size, 1, capacity - size, fd)) > 0);
+
+   fclose(fd);
+
+   if (bytes < 0) {
+      free(env);
+      return NULL;
    }
+
+   size += bytes;
+
+   env = xRealloc(env, size + 2);
+
+   env[size] = '\0';
+   env[size+1] = '\0';
+
    return env;
 }
 
@@ -263,4 +320,88 @@ void Platform_getPressureStall(const char *file, bool some, double* ten, double*
    (void) total;
    assert(total == 3);
    fclose(fd);
+}
+
+bool Platform_getDiskIO(DiskIOData* data) {
+   FILE *fd = fopen(PROCDIR "/diskstats", "r");
+   if (!fd)
+      return false;
+
+   unsigned long int read_sum = 0, write_sum = 0, timeSpend_sum = 0;
+   char lineBuffer[256];
+   while (fgets(lineBuffer, sizeof(lineBuffer), fd)) {
+      char diskname[32];
+      unsigned long int read_tmp, write_tmp, timeSpend_tmp;
+      if (sscanf(lineBuffer, "%*d %*d %31s %*u %*u %lu %*u %*u %*u %lu %*u %*u %lu", diskname, &read_tmp, &write_tmp, &timeSpend_tmp) == 4) {
+         if (String_startsWith(diskname, "dm-"))
+            continue;
+
+         /* only count root disks, e.g. do not count IO from sda and sda1 twice */
+         if ((diskname[0] == 's' || diskname[0] == 'h')
+             && diskname[1] == 'd'
+             && isalpha((unsigned char)diskname[2])
+             && isdigit((unsigned char)diskname[3]))
+            continue;
+
+         /* only count root disks, e.g. do not count IO from mmcblk0 and mmcblk0p1 twice */
+         if (diskname[0] == 'm'
+             && diskname[1] == 'm'
+             && diskname[2] == 'c'
+             && diskname[3] == 'b'
+             && diskname[4] == 'l'
+             && diskname[5] == 'k'
+             && isdigit((unsigned char)diskname[6])
+             && diskname[7] == 'p')
+            continue;
+
+         read_sum += read_tmp;
+         write_sum += write_tmp;
+         timeSpend_sum += timeSpend_tmp;
+      }
+   }
+   fclose(fd);
+   /* multiply with sector size */
+   data->totalBytesRead = 512 * read_sum;
+   data->totalBytesWritten = 512 * write_sum;
+   data->totalMsTimeSpend = timeSpend_sum;
+   return true;
+}
+
+bool Platform_getNetworkIO(unsigned long int *bytesReceived,
+                           unsigned long int *packetsReceived,
+                           unsigned long int *bytesTransmitted,
+                           unsigned long int *packetsTransmitted) {
+   FILE *fd = fopen(PROCDIR "/net/dev", "r");
+   if (!fd)
+      return false;
+
+   unsigned long int bytesReceivedSum = 0, packetsReceivedSum = 0, bytesTransmittedSum = 0, packetsTransmittedSum = 0;
+   char lineBuffer[512];
+   while (fgets(lineBuffer, sizeof(lineBuffer), fd)) {
+      char interfaceName[32];
+      unsigned long int bytesReceivedParsed, packetsReceivedParsed, bytesTransmittedParsed, packetsTransmittedParsed;
+      if (sscanf(lineBuffer, "%31s %lu %lu %*u %*u %*u %*u %*u %*u %lu %lu",
+                             interfaceName,
+                             &bytesReceivedParsed,
+                             &packetsReceivedParsed,
+                             &bytesTransmittedParsed,
+                             &packetsTransmittedParsed) != 5)
+         continue;
+
+      if (String_eq(interfaceName, "lo:"))
+         continue;
+
+      bytesReceivedSum += bytesReceivedParsed;
+      packetsReceivedSum += packetsReceivedParsed;
+      bytesTransmittedSum += bytesTransmittedParsed;
+      packetsTransmittedSum += packetsTransmittedParsed;
+   }
+
+   fclose(fd);
+
+   *bytesReceived = bytesReceivedSum;
+   *packetsReceived = packetsReceivedSum;
+   *bytesTransmitted = bytesTransmittedSum;
+   *packetsTransmitted = packetsTransmittedSum;
+   return true;
 }

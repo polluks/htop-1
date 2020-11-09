@@ -1,41 +1,46 @@
 /*
 htop - TasksMeter.c
 (C) 2004-2011 Hisham H. Muhammad
-Released under the GNU GPL, see the COPYING file
+Released under the GNU GPLv2, see the COPYING file
 in the source distribution for its full text.
 */
 
 #include "TasksMeter.h"
 
-#include "Platform.h"
 #include "CRT.h"
+#include "Macros.h"
+#include "Object.h"
+#include "ProcessList.h"
+#include "RichString.h"
+#include "Settings.h"
+#include "XUtils.h"
 
-/*{
-#include "Meter.h"
-}*/
 
-int TasksMeter_attributes[] = {
-   CPU_SYSTEM, PROCESS_THREAD, PROCESS, TASKS_RUNNING
+static const int TasksMeter_attributes[] = {
+   CPU_SYSTEM,
+   PROCESS_THREAD,
+   PROCESS,
+   TASKS_RUNNING
 };
 
 static void TasksMeter_updateValues(Meter* this, char* buffer, int len) {
-   ProcessList* pl = this->pl;
+   const ProcessList* pl = this->pl;
    this->values[0] = pl->kernelThreads;
    this->values[1] = pl->userlandThreads;
    this->values[2] = pl->totalTasks - pl->kernelThreads - pl->userlandThreads;
-   this->values[3] = MIN(pl->runningTasks, pl->cpuCount);
+   this->values[3] = MINIMUM(pl->runningTasks, pl->cpuCount);
    if (pl->totalTasks > this->total) {
       this->total = pl->totalTasks;
    }
-   if (this->pl->settings->hideKernelThreads) {
+   if (pl->settings->hideKernelThreads) {
       this->values[0] = 0;
    }
    xSnprintf(buffer, len, "%d/%d", (int) this->values[3], (int) this->total);
 }
 
-static void TasksMeter_display(Object* cast, RichString* out) {
-   Meter* this = (Meter*)cast;
-   Settings* settings = this->pl->settings;
+static void TasksMeter_display(const Object* cast, RichString* out) {
+   const Meter* this = (const Meter*)cast;
+   const Settings* settings = this->pl->settings;
    char buffer[20];
 
    int processes = (int) this->values[2];
@@ -66,7 +71,7 @@ static void TasksMeter_display(Object* cast, RichString* out) {
    RichString_append(out, CRT_colors[METER_TEXT], " running");
 }
 
-MeterClass TasksMeter_class = {
+const MeterClass TasksMeter_class = {
    .super = {
       .extends = Class(Meter),
       .delete = Meter_delete,

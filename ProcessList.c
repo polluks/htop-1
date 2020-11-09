@@ -1,88 +1,24 @@
 /*
 htop - ProcessList.c
 (C) 2004,2005 Hisham H. Muhammad
-Released under the GNU GPL, see the COPYING file
+Released under the GNU GPLv2, see the COPYING file
 in the source distribution for its full text.
 */
 
 #include "ProcessList.h"
-#include "Platform.h"
 
-#include "CRT.h"
-#include "StringUtils.h"
-
-#include <stdlib.h>
+#include <assert.h>
 #include <string.h>
 
-/*{
-#include "Vector.h"
-#include "Hashtable.h"
-#include "UsersTable.h"
-#include "Panel.h"
-#include "Process.h"
-#include "Settings.h"
+#include "CRT.h"
+#include "XUtils.h"
 
-#ifdef HAVE_LIBHWLOC
-#include <hwloc.h>
-#endif
 
-#ifndef MAX_NAME
-#define MAX_NAME 128
-#endif
-
-#ifndef MAX_READ
-#define MAX_READ 2048
-#endif
-
-typedef struct ProcessList_ {
-   Settings* settings;
-
-   Vector* processes;
-   Vector* processes2;
-   Hashtable* processTable;
-   UsersTable* usersTable;
-
-   Panel* panel;
-   int following;
-   uid_t userId;
-   const char* incFilter;
-   Hashtable* pidWhiteList;
-
-   #ifdef HAVE_LIBHWLOC
-   hwloc_topology_t topology;
-   bool topologyOk;
-   #endif
-
-   int totalTasks;
-   int runningTasks;
-   int userlandThreads;
-   int kernelThreads;
-
-   unsigned long long int totalMem;
-   unsigned long long int usedMem;
-   unsigned long long int freeMem;
-   unsigned long long int sharedMem;
-   unsigned long long int buffersMem;
-   unsigned long long int cachedMem;
-   unsigned long long int totalSwap;
-   unsigned long long int usedSwap;
-   unsigned long long int freeSwap;
-
-   int cpuCount;
-
-} ProcessList;
-
-ProcessList* ProcessList_new(UsersTable* ut, Hashtable* pidWhiteList, uid_t userId);
-void ProcessList_delete(ProcessList* pl);
-void ProcessList_goThroughEntries(ProcessList* pl);
-
-}*/
-
-ProcessList* ProcessList_init(ProcessList* this, ObjectClass* klass, UsersTable* usersTable, Hashtable* pidWhiteList, uid_t userId) {
+ProcessList* ProcessList_init(ProcessList* this, const ObjectClass* klass, UsersTable* usersTable, Hashtable* pidMatchList, uid_t userId) {
    this->processes = Vector_new(klass, true, DEFAULT_SIZE);
    this->processTable = Hashtable_new(140, false);
    this->usersTable = usersTable;
-   this->pidWhiteList = pidWhiteList;
+   this->pidMatchList = pidMatchList;
    this->userId = userId;
 
    // tree-view auxiliary buffer
@@ -93,12 +29,19 @@ ProcessList* ProcessList_init(ProcessList* this, ObjectClass* klass, UsersTable*
 
 #ifdef HAVE_LIBHWLOC
    this->topologyOk = false;
-   int topoErr = hwloc_topology_init(&this->topology);
-   if (topoErr == 0) {
-      topoErr = hwloc_topology_load(this->topology);
-   }
-   if (topoErr == 0) {
-      this->topologyOk = true;
+   if (hwloc_topology_init(&this->topology) == 0) {
+      this->topologyOk =
+         #if HWLOC_API_VERSION < 0x00020000
+         /* try to ignore the top-level machine object type */
+         0 == hwloc_topology_ignore_type_keep_structure(this->topology, HWLOC_OBJ_MACHINE) &&
+         /* ignore caches, which don't add structure */
+         0 == hwloc_topology_ignore_type_keep_structure(this->topology, HWLOC_OBJ_CORE) &&
+         0 == hwloc_topology_ignore_type_keep_structure(this->topology, HWLOC_OBJ_CACHE) &&
+         0 == hwloc_topology_set_flags(this->topology, HWLOC_TOPOLOGY_FLAG_WHOLE_SYSTEM) &&
+         #else
+         0 == hwloc_topology_set_all_types_filter(this->topology, HWLOC_TYPE_FILTER_KEEP_STRUCTURE) &&
+         #endif
+         0 == hwloc_topology_load(this->topology);
    }
 #endif
 
@@ -124,7 +67,7 @@ void ProcessList_setPanel(ProcessList* this, Panel* panel) {
 
 void ProcessList_printHeader(ProcessList* this, RichString* header) {
    RichString_prune(header);
-   ProcessField* fields = this->settings->fields;
+   const ProcessField* fields = this->settings->fields;
    for (int i = 0; fields[i]; i++) {
       const char* field = Process_fields[fields[i]].title;
       if (!field) field = "- ";
@@ -183,12 +126,12 @@ static void ProcessList_buildTree(ProcessList* this, pid_t pid, int level, int i
       Process* process = (Process*) (Vector_get(children, i));
       if (!show)
          process->show = false;
-      int s = this->processes2->items;
+      int s = Vector_size(this->processes2);
       if (direction == 1)
          Vector_add(this->processes2, process);
       else
          Vector_insert(this->processes2, 0, process);
-      assert(this->processes2->items == s+1); (void)s;
+      assert(Vector_size(this->processes2) == s+1); (void)s;
       int nextIndent = indent | (1 << level);
       ProcessList_buildTree(this, process->pid, level+1, (i < size - 1) ? nextIndent : indent, direction, show ? process->showChildren : false);
       if (i == size - 1)
@@ -199,20 +142,21 @@ static void ProcessList_buildTree(ProcessList* this, pid_t pid, int level, int i
    Vector_delete(children);
 }
 
+static long ProcessList_treeProcessCompare(const void* v1, const void* v2) {
+   const Process *p1 = (const Process*)v1;
+   const Process *p2 = (const Process*)v2;
+
+   return p1->pid - p2->pid;
+}
+
 void ProcessList_sort(ProcessList* this) {
    if (!this->settings->treeView) {
       Vector_insertionSort(this->processes);
    } else {
       // Save settings
       int direction = this->settings->direction;
-      int sortKey = this->settings->sortKey;
       // Sort by PID
-      this->settings->sortKey = PID;
-      this->settings->direction = 1;
-      Vector_quickSort(this->processes);
-      // Restore settings
-      this->settings->sortKey = sortKey;
-      this->settings->direction = direction;
+      Vector_quickSortCustomCompare(this->processes, ProcessList_treeProcessCompare);
       int vsize = Vector_size(this->processes);
       // Find all processes whose parent is not visible
       int size;
@@ -271,7 +215,7 @@ void ProcessList_sort(ProcessList* this) {
 
 ProcessField ProcessList_keyAt(ProcessList* this, int at) {
    int x = 0;
-   ProcessField* fields = this->settings->fields;
+   const ProcessField* fields = this->settings->fields;
    ProcessField field;
    for (int i = 0; (field = fields[i]); i++) {
       const char* title = Process_fields[field].title;
@@ -310,7 +254,7 @@ void ProcessList_rebuildPanel(ProcessList* this) {
       if ( (!p->show)
          || (this->userId != (uid_t) -1 && (p->st_uid != this->userId))
          || (incFilter && !(String_contains_i(p->comm, incFilter)))
-         || (this->pidWhiteList && !Hashtable_get(this->pidWhiteList, p->tgid)) )
+         || (this->pidMatchList && !Hashtable_get(this->pidMatchList, p->tgid)) )
          hidden = true;
 
       if (!hidden) {
@@ -338,7 +282,13 @@ Process* ProcessList_getProcess(ProcessList* this, pid_t pid, bool* preExisting,
    return proc;
 }
 
-void ProcessList_scan(ProcessList* this) {
+void ProcessList_scan(ProcessList* this, bool pauseProcessUpdate) {
+
+   // in pause mode only gather global data for meters (CPU/memory/...)
+   if (pauseProcessUpdate) {
+      ProcessList_goThroughEntries(this, true);
+      return;
+   }
 
    // mark all process as "dirty"
    for (int i = 0; i < Vector_size(this->processes); i++) {
@@ -352,7 +302,7 @@ void ProcessList_scan(ProcessList* this) {
    this->kernelThreads = 0;
    this->runningTasks = 0;
 
-   ProcessList_goThroughEntries(this);
+   ProcessList_goThroughEntries(this, false);
 
    for (int i = Vector_size(this->processes) - 1; i >= 0; i--) {
       Process* p = (Process*) Vector_get(this->processes, i);

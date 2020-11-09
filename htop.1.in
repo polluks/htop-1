@@ -2,11 +2,11 @@
 .SH "NAME"
 htop \- interactive process viewer
 .SH "SYNOPSIS"
-.LP 
+.LP
 .B htop
-.RB [ \-dChpustv ]
+.RB [ \-dCFhpustv ]
 .SH "DESCRIPTION"
-.LP 
+.LP
 .B htop
 is a cross-platform ncurses-based process viewer.
 .LP
@@ -20,11 +20,11 @@ multiple processes and acting on them all at once.
 .LP
 Tasks related to processes (killing, renicing) can be done without
 entering their PIDs.
-.br 
+.br
 .SH "COMMAND-LINE OPTIONS"
 .LP
 Mandatory arguments to long options are mandatory for short options too.
-.LP 
+.LP
 .TP
 \fB\-d \-\-delay=DELAY\fR
 Delay between updates, in tenths of seconds. If the delay value is
@@ -35,6 +35,9 @@ is greater than 100, it is decreased to 100, i.e. 10 seconds.
 Start
 .B htop
 in monochrome mode
+.TP
+\fB\-F \-\-filter=FILTER
+Filter processes by command
 .TP
 \fB\-h \-\-help
 Display a help message and exit
@@ -48,16 +51,22 @@ Sort by this column (use \-\-sort\-key help for a column list)
 \fB\-u \-\-user=USERNAME\fR
 Show only the processes of a given user
 .TP
-\fB\-v \-\-version
+\fB\-U \-\-no-unicode\fR
+Do not use unicode but ASCII characters for graph meters
+.TP
+\fB\-M \-\-no-mouse\fR
+Disable support of mouse control
+.TP
+\fB\-V \-\-version
 Output version information and exit
 .TP
 \fB\-t \-\-tree
 Show processes in tree view
 .SH "INTERACTIVE COMMANDS"
-.LP 
+.LP
 The following commands are supported while in
 .BR htop :
-.LP 
+.LP
 .TP 5
 .B Up, Alt-k
 Select (highlight) the previous process in the process list. Scroll the list
@@ -110,6 +119,10 @@ update of system calls issued by the process.
 Display open files for a process: if lsof(1) is installed, pressing this key
 will display the list of file descriptors opened by the process.
 .TP
+.B w
+Display the command line of the selected process in a separate screen, wrapped
+onto multiple lines as needed.
+.TP
 .B F1, h, ?
 Go to the help screen
 .TP
@@ -159,7 +172,7 @@ Quit
 Invert the sort order: if sort order is increasing, switch to decreasing, and
 vice-versa.
 .TP
-.B +, \- 
+.B +, \-
 When in tree view mode, expand or collapse subtree. When a subtree is collapsed
 a "+" sign shows to the left of the process name.
 .TP
@@ -196,6 +209,9 @@ userspace processes in the process list. (This is a toggle key.)
 .B p
 Show full paths to running programs, where applicable. (This is a toggle key.)
 .TP
+.B Z
+Pause/resume process updates.
+.TP
 .B Ctrl-L
 Refresh: redraw screen and recalculate values.
 .TP
@@ -203,7 +219,7 @@ Refresh: redraw screen and recalculate values.
 PID search: type in process ID and the selection highlight will be moved to it.
 .PD
 .SH "COLUMNS"
-.LP 
+.LP
 The following columns can display data about each process. A value of '\-' in
 all the rows indicates that a column is unsupported on your system, or
 currently unimplemented in
@@ -213,11 +229,11 @@ The names below are the ones used in the
 shown in
 .BR htop 's
 main screen, it is shown below in parenthesis.
-.LP 
+.LP
 .TP 5
 .B Command
 The full command line of the process (i.e. program name and arguments).
-.TP 
+.TP
 .B PID
 The process ID.
 .TP
@@ -238,7 +254,7 @@ The process's group ID.
 .TP
 .B SESSION (SID)
 The process's session ID.
-.TP 
+.TP
 .B TTY_NR (TTY)
 The controlling terminal of the process.
 .TP
@@ -314,6 +330,17 @@ The library size of the process.
 .B M_DT (DIRTY)
 The size of the dirty pages of the process.
 .TP
+.B M_SWAP (SWAP)
+The size of the process's swapped pages.
+.TP
+.B M_PSS (PSS)
+The proportional set size, same as M_RESIDENT but each page is divided by the
+number of processes sharing it.
+.TP
+.B M_M_PSSWP (PSSWP)
+The proportional swap share of this mapping, unlike M_SWAP this does not take
+into account swapped out page of underlying shmem objects.
+.TP
 .B ST_UID (UID)
 The user ID of the process owner.
 .TP
@@ -383,6 +410,9 @@ Which cgroup the process is in.
 .B OOM
 OOM killer score.
 .TP
+.B CTXT
+Incremental sum of voluntary and nonvoluntary context switches.
+.TP
 .B IO_PRIORITY (IO)
 The I/O scheduling class followed by the priority if the class supports it:
    \fBR\fR for Realtime
@@ -401,7 +431,7 @@ The percentage of time spent swapping in pages. Requires CAP_NET_ADMIN.
 .B All other flags
 Currently unsupported (always displays '-').
 .SH "CONFIG FILE"
-.LP 
+.LP
 By default
 .B htop
 reads its configuration from the XDG-compliant path
@@ -437,7 +467,7 @@ space and make memory size representations consistent throughout
 and
 .BR limits.conf (5).
 .SH "AUTHORS"
-.LP 
+.LP
 .B htop
 was originally developed by Hisham Muhammad.
 Nowadays it is maintained by the community at <htop@groups.io>.
