@@ -8,29 +8,24 @@ in the source distribution for its full text.
 */
 
 #include <kvm.h>
-#include <sys/param.h> // needs to be included before <sys/jail.h> for MAXPATHLEN
-#include <sys/jail.h>
-#include <sys/resource.h>
-#include <sys/uio.h>
+#include <stdbool.h>
+#include <sys/types.h>
 
-#include "FreeBSDProcess.h"
 #include "Hashtable.h"
-#include "Process.h"
 #include "ProcessList.h"
 #include "UsersTable.h"
 #include "zfs/ZfsArcStats.h"
 
-
-#define JAIL_ERRMSGLEN 1024
-extern char jail_errmsg[JAIL_ERRMSGLEN];
 
 typedef struct CPUData_ {
    double userPercent;
    double nicePercent;
    double systemPercent;
    double irqPercent;
-   double idlePercent;
    double systemAllPercent;
+
+   double frequency;
+   double temperature;
 } CPUData;
 
 typedef struct FreeBSDProcessList_ {
@@ -39,8 +34,6 @@ typedef struct FreeBSDProcessList_ {
 
    unsigned long long int memWire;
    unsigned long long int memActive;
-   unsigned long long int memInactive;
-   unsigned long long int memFree;
 
    ZfsArcStats zfs;
 
@@ -48,11 +41,11 @@ typedef struct FreeBSDProcessList_ {
 
    Hashtable* ttys;
 
-   unsigned long   *cp_time_o;
-   unsigned long   *cp_time_n;
+   unsigned long* cp_time_o;
+   unsigned long* cp_time_n;
 
-   unsigned long  *cp_times_o;
-   unsigned long  *cp_times_n;
+   unsigned long* cp_times_o;
+   unsigned long* cp_times_n;
 
 } FreeBSDProcessList;
 

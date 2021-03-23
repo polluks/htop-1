@@ -33,6 +33,7 @@ typedef struct CPUData_ {
    double irqPercent;
    double idlePercent;
    double systemAllPercent;
+   double frequency;
    uint64_t luser;
    uint64_t lkrnl;
    uint64_t lintr;
@@ -58,7 +59,7 @@ void ProcessList_delete(ProcessList* pl);
  *       system for more info.
  */
 
-int SolarisProcessList_walkproc(psinfo_t *_psinfo, lwpsinfo_t *_lwpsinfo, void *listptr);
+int SolarisProcessList_walkproc(psinfo_t* _psinfo, lwpsinfo_t* _lwpsinfo, void* listptr);
 
 void ProcessList_goThroughEntries(ProcessList* super, bool pauseProcessUpdate);
 

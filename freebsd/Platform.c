@@ -5,14 +5,22 @@ Released under the GNU GPLv2, see the COPYING file
 in the source distribution for its full text.
 */
 
+#include "config.h" // IWYU pragma: keep
+
 #include "Platform.h"
 
 #include <devstat.h>
 #include <math.h>
+#include <stdint.h>
+#include <stdlib.h>
 #include <time.h>
 #include <net/if.h>
 #include <net/if_mib.h>
+#include <sys/_types.h>
+#include <sys/devicestat.h>
+#include <sys/param.h>
 #include <sys/resource.h>
+#include <sys/socket.h>
 #include <sys/sysctl.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -31,16 +39,18 @@ in the source distribution for its full text.
 #include "MemoryMeter.h"
 #include "Meter.h"
 #include "NetworkIOMeter.h"
+#include "ProcessList.h"
+#include "Settings.h"
 #include "SwapMeter.h"
+#include "SysArchMeter.h"
 #include "TasksMeter.h"
 #include "UptimeMeter.h"
+#include "XUtils.h"
 #include "zfs/ZfsArcMeter.h"
 #include "zfs/ZfsCompressedArcMeter.h"
 
 
-ProcessField Platform_defaultFields[] = { PID, USER, PRIORITY, NICE, M_SIZE, M_RESIDENT, STATE, PERCENT_CPU, PERCENT_MEM, TIME, COMM, 0 };
-
-int Platform_numberOfFields = LAST_PROCESSFIELD;
+const ProcessField Platform_defaultFields[] = { PID, USER, PRIORITY, NICE, M_VIRT, M_RESIDENT, STATE, PERCENT_CPU, PERCENT_MEM, TIME, COMM, 0 };
 
 const SignalItem Platform_signals[] = {
    { .name = " 0 Cancel",    .number =  0 },
@@ -81,10 +91,6 @@ const SignalItem Platform_signals[] = {
 
 const unsigned int Platform_numberOfSignals = ARRAYSIZE(Platform_signals);
 
-void Platform_setBindings(Htop_Action* keys) {
-   (void) keys;
-}
-
 const MeterClass* const Platform_meterTypes[] = {
    &CPUMeter_class,
    &ClockMeter_class,
@@ -98,6 +104,7 @@ const MeterClass* const Platform_meterTypes[] = {
    &UptimeMeter_class,
    &BatteryMeter_class,
    &HostnameMeter_class,
+   &SysArchMeter_class,
    &AllCPUsMeter_class,
    &AllCPUs2Meter_class,
    &AllCPUs4Meter_class,
@@ -118,9 +125,22 @@ const MeterClass* const Platform_meterTypes[] = {
    NULL
 };
 
+void Platform_init(void) {
+   /* no platform-specific setup needed */
+}
+
+void Platform_done(void) {
+   /* no platform-specific cleanup needed */
+}
+
+void Platform_setBindings(Htop_Action* keys) {
+   /* no platform-specific key bindings */
+   (void) keys;
+}
+
 int Platform_getUptime() {
    struct timeval bootTime, currTime;
-   int mib[2] = { CTL_KERN, KERN_BOOTTIME };
+   const int mib[2] = { CTL_KERN, KERN_BOOTTIME };
    size_t size = sizeof(bootTime);
 
    int err = sysctl(mib, 2, &bootTime, &size, NULL, 0);
@@ -134,7 +154,7 @@ int Platform_getUptime() {
 
 void Platform_getLoadAverage(double* one, double* five, double* fifteen) {
    struct loadavg loadAverage;
-   int mib[2] = { CTL_VM, VM_LOADAVG };
+   const int mib[2] = { CTL_VM, VM_LOADAVG };
    size_t size = sizeof(loadAverage);
 
    int err = sysctl(mib, 2, &loadAverage, &size, NULL, 0);
@@ -159,16 +179,16 @@ int Platform_getMaxPid() {
    return maxPid;
 }
 
-double Platform_setCPUValues(Meter* this, int cpu) {
+double Platform_setCPUValues(Meter* this, unsigned int cpu) {
    const FreeBSDProcessList* fpl = (const FreeBSDProcessList*) this->pl;
-   int cpus = this->pl->cpuCount;
+   unsigned int cpus = this->pl->cpuCount;
    const CPUData* cpuData;
 
    if (cpus == 1) {
-     // single CPU box has everything in fpl->cpus[0]
-     cpuData = &(fpl->cpus[0]);
+      // single CPU box has everything in fpl->cpus[0]
+      cpuData = &(fpl->cpus[0]);
    } else {
-     cpuData = &(fpl->cpus[cpu]);
+      cpuData = &(fpl->cpus[cpu]);
    }
 
    double  percent;
@@ -180,34 +200,37 @@ double Platform_setCPUValues(Meter* this, int cpu) {
       v[CPU_METER_KERNEL]  = cpuData->systemPercent;
       v[CPU_METER_IRQ]     = cpuData->irqPercent;
       this->curItems = 4;
-      percent = v[0]+v[1]+v[2]+v[3];
+      percent = v[0] + v[1] + v[2] + v[3];
    } else {
       v[2] = cpuData->systemAllPercent;
       this->curItems = 3;
-      percent = v[0]+v[1]+v[2];
+      percent = v[0] + v[1] + v[2];
    }
 
    percent = CLAMP(percent, 0.0, 100.0);
 
-   v[CPU_METER_FREQUENCY] = NAN;
+   v[CPU_METER_FREQUENCY] = cpuData->frequency;
+   v[CPU_METER_TEMPERATURE] = cpuData->temperature;
 
    return percent;
 }
 
 void Platform_setMemoryValues(Meter* this) {
-   // TODO
    const ProcessList* pl = this->pl;
 
    this->total = pl->totalMem;
    this->values[0] = pl->usedMem;
    this->values[1] = pl->buffersMem;
-   this->values[2] = pl->cachedMem;
+   // this->values[2] = "shared memory, like tmpfs and shm"
+   this->values[3] = pl->cachedMem;
+   // this->values[4] = "available memory"
 }
 
 void Platform_setSwapValues(Meter* this) {
    const ProcessList* pl = this->pl;
    this->total = pl->totalSwap;
    this->values[0] = pl->usedSwap;
+   this->values[1] = NAN;
 }
 
 void Platform_setZfsArcValues(Meter* this) {
@@ -223,24 +246,35 @@ void Platform_setZfsCompressedArcValues(Meter* this) {
 }
 
 char* Platform_getProcessEnv(pid_t pid) {
-   int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_ENV, pid };
+   const int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_ENV, pid };
 
    size_t capacity = ARG_MAX;
    char* env = xMalloc(capacity);
 
    int err = sysctl(mib, 4, env, &capacity, NULL, 0);
-   if (err) {
+   if (err || capacity == 0) {
       free(env);
       return NULL;
    }
 
-   if (env[capacity-1] || env[capacity-2]) {
-      env = xRealloc(env, capacity+2);
+   if (env[capacity - 1] || env[capacity - 2]) {
+      env = xRealloc(env, capacity + 2);
       env[capacity] = 0;
-      env[capacity+1] = 0;
+      env[capacity + 1] = 0;
    }
 
    return env;
+}
+
+char* Platform_getInodeFilename(pid_t pid, ino_t inode) {
+    (void)pid;
+    (void)inode;
+    return NULL;
+}
+
+FileLocks_ProcessData* Platform_getProcessLocks(pid_t pid) {
+    (void)pid;
+    return NULL;
 }
 
 bool Platform_getDiskIO(DiskIOData* data) {
@@ -257,7 +291,7 @@ bool Platform_getDiskIO(DiskIOData* data) {
 
    int count = current.dinfo->numdevs;
 
-   unsigned long int bytesReadSum = 0, bytesWriteSum = 0, timeSpendSum = 0;
+   unsigned long long int bytesReadSum = 0, bytesWriteSum = 0, timeSpendSum = 0;
 
    // get data
    for (int i = 0; i < count; i++) {
@@ -283,24 +317,17 @@ bool Platform_getDiskIO(DiskIOData* data) {
    return true;
 }
 
-bool Platform_getNetworkIO(unsigned long int *bytesReceived,
-                           unsigned long int *packetsReceived,
-                           unsigned long int *bytesTransmitted,
-                           unsigned long int *packetsTransmitted) {
-   int r;
-
+bool Platform_getNetworkIO(NetworkIOData* data) {
    // get number of interfaces
    int count;
    size_t countLen = sizeof(count);
    const int countMib[] = { CTL_NET, PF_LINK, NETLINK_GENERIC, IFMIB_SYSTEM, IFMIB_IFCOUNT };
 
-   r = sysctl(countMib, ARRAYSIZE(countMib), &count, &countLen, NULL, 0);
+   int r = sysctl(countMib, ARRAYSIZE(countMib), &count, &countLen, NULL, 0);
    if (r < 0)
       return false;
 
-
-   unsigned long int bytesReceivedSum = 0, packetsReceivedSum = 0, bytesTransmittedSum = 0, packetsTransmittedSum = 0;
-
+   memset(data, 0, sizeof(NetworkIOData));
    for (int i = 1; i <= count; i++) {
       struct ifmibdata ifmd;
       size_t ifmdLen = sizeof(ifmd);
@@ -314,15 +341,27 @@ bool Platform_getNetworkIO(unsigned long int *bytesReceived,
       if (ifmd.ifmd_flags & IFF_LOOPBACK)
          continue;
 
-      bytesReceivedSum += ifmd.ifmd_data.ifi_ibytes;
-      packetsReceivedSum += ifmd.ifmd_data.ifi_ipackets;
-      bytesTransmittedSum += ifmd.ifmd_data.ifi_obytes;
-      packetsTransmittedSum += ifmd.ifmd_data.ifi_opackets;
+      data->bytesReceived += ifmd.ifmd_data.ifi_ibytes;
+      data->packetsReceived += ifmd.ifmd_data.ifi_ipackets;
+      data->bytesTransmitted += ifmd.ifmd_data.ifi_obytes;
+      data->packetsTransmitted += ifmd.ifmd_data.ifi_opackets;
    }
 
-   *bytesReceived = bytesReceivedSum;
-   *packetsReceived = packetsReceivedSum;
-   *bytesTransmitted = bytesTransmittedSum;
-   *packetsTransmitted = packetsTransmittedSum;
    return true;
+}
+
+void Platform_getBattery(double* percent, ACPresence* isOnAC) {
+   int life;
+   size_t life_len = sizeof(life);
+   if (sysctlbyname("hw.acpi.battery.life", &life, &life_len, NULL, 0) == -1)
+      *percent = NAN;
+   else
+      *percent = life;
+
+   int acline;
+   size_t acline_len = sizeof(acline);
+   if (sysctlbyname("hw.acpi.acline", &acline, &acline_len, NULL, 0) == -1)
+      *isOnAC = AC_ERROR;
+   else
+      *isOnAC = acline == 0 ? AC_ABSENT : AC_PRESENT;
 }

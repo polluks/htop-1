@@ -23,7 +23,7 @@ static const int TasksMeter_attributes[] = {
    TASKS_RUNNING
 };
 
-static void TasksMeter_updateValues(Meter* this, char* buffer, int len) {
+static void TasksMeter_updateValues(Meter* this) {
    const ProcessList* pl = this->pl;
    this->values[0] = pl->kernelThreads;
    this->values[1] = pl->userlandThreads;
@@ -35,7 +35,7 @@ static void TasksMeter_updateValues(Meter* this, char* buffer, int len) {
    if (pl->settings->hideKernelThreads) {
       this->values[0] = 0;
    }
-   xSnprintf(buffer, len, "%d/%d", (int) this->values[3], (int) this->total);
+   xSnprintf(this->txtBuffer, sizeof(this->txtBuffer), "%d/%d", (int) this->values[3], (int) this->total);
 }
 
 static void TasksMeter_display(const Object* cast, RichString* out) {
@@ -46,7 +46,7 @@ static void TasksMeter_display(const Object* cast, RichString* out) {
    int processes = (int) this->values[2];
 
    xSnprintf(buffer, sizeof(buffer), "%d", processes);
-   RichString_write(out, CRT_colors[METER_VALUE], buffer);
+   RichString_writeAscii(out, CRT_colors[METER_VALUE], buffer);
    int threadValueColor = CRT_colors[METER_VALUE];
    int threadCaptionColor = CRT_colors[METER_TEXT];
    if (settings->highlightThreads) {
@@ -54,21 +54,21 @@ static void TasksMeter_display(const Object* cast, RichString* out) {
       threadCaptionColor = CRT_colors[PROCESS_THREAD];
    }
    if (!settings->hideUserlandThreads) {
-      RichString_append(out, CRT_colors[METER_TEXT], ", ");
+      RichString_appendAscii(out, CRT_colors[METER_TEXT], ", ");
       xSnprintf(buffer, sizeof(buffer), "%d", (int)this->values[1]);
-      RichString_append(out, threadValueColor, buffer);
-      RichString_append(out, threadCaptionColor, " thr");
+      RichString_appendAscii(out, threadValueColor, buffer);
+      RichString_appendAscii(out, threadCaptionColor, " thr");
    }
    if (!settings->hideKernelThreads) {
-      RichString_append(out, CRT_colors[METER_TEXT], ", ");
+      RichString_appendAscii(out, CRT_colors[METER_TEXT], ", ");
       xSnprintf(buffer, sizeof(buffer), "%d", (int)this->values[0]);
-      RichString_append(out, threadValueColor, buffer);
-      RichString_append(out, threadCaptionColor, " kthr");
+      RichString_appendAscii(out, threadValueColor, buffer);
+      RichString_appendAscii(out, threadCaptionColor, " kthr");
    }
-   RichString_append(out, CRT_colors[METER_TEXT], "; ");
+   RichString_appendAscii(out, CRT_colors[METER_TEXT], "; ");
    xSnprintf(buffer, sizeof(buffer), "%d", (int)this->values[3]);
-   RichString_append(out, CRT_colors[TASKS_RUNNING], buffer);
-   RichString_append(out, CRT_colors[METER_TEXT], " running");
+   RichString_appendAscii(out, CRT_colors[TASKS_RUNNING], buffer);
+   RichString_appendAscii(out, CRT_colors[METER_TEXT], " running");
 }
 
 const MeterClass TasksMeter_class = {

@@ -9,10 +9,19 @@ in the source distribution for its full text.
 
 #include "Settings.h"
 
-#define Process_delete UnsupportedProcess_delete
+typedef struct UnsupportedProcess_ {
+   Process super;
 
-Process* UnsupportedProcess_new(Settings* settings);
+   /* Add platform specific fields */
+} UnsupportedProcess;
 
-void UnsupportedProcess_delete(Object* cast);
+
+extern const ProcessFieldData Process_fields[LAST_PROCESSFIELD];
+
+Process* UnsupportedProcess_new(const Settings* settings);
+
+void Process_delete(Object* cast);
+
+extern const ProcessClass UnsupportedProcess_class;
 
 #endif

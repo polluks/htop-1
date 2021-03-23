@@ -18,6 +18,8 @@ in the source distribution for its full text.
 #include "ZramStats.h"
 #include "zfs/ZfsArcStats.h"
 
+#define HTOP_HUGEPAGE_BASE_SHIFT 16
+#define HTOP_HUGEPAGE_COUNT 24
 
 typedef struct CPUData_ {
    unsigned long long int totalTime;
@@ -47,6 +49,10 @@ typedef struct CPUData_ {
    unsigned long long int guestPeriod;
 
    double frequency;
+
+   #ifdef HAVE_SENSORS_SENSORS_H
+   double temperature;
+   #endif
 } CPUData;
 
 typedef struct TtyDriver_ {
@@ -64,9 +70,14 @@ typedef struct LinuxProcessList_ {
    bool haveSmapsRollup;
 
    #ifdef HAVE_DELAYACCT
-   struct nl_sock *netlink_socket;
+   struct nl_sock* netlink_socket;
    int netlink_family;
    #endif
+
+   memory_t totalHugePageMem;
+   memory_t usedHugePageMem[HTOP_HUGEPAGE_COUNT];
+
+   memory_t availableMem;
 
    ZfsArcStats zfs;
    ZramStats zram;

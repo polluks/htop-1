@@ -8,38 +8,34 @@ in the source distribution for its full text.
 */
 
 #include <stdbool.h>
+#include <stddef.h>
 
 
-typedef void(*Hashtable_PairFunction)(int, void*, void*);
+typedef unsigned int ht_key_t;
 
-typedef struct HashtableItem {
-   unsigned int key;
-   void* value;
-   struct HashtableItem* next;
-} HashtableItem;
+typedef void(*Hashtable_PairFunction)(ht_key_t key, void* value, void* userdata);
 
-typedef struct Hashtable_ {
-   int size;
-   HashtableItem** buckets;
-   int items;
-   bool owner;
-} Hashtable;
+typedef struct Hashtable_ Hashtable;
 
 #ifndef NDEBUG
 
-int Hashtable_count(Hashtable* this);
+size_t Hashtable_count(const Hashtable* this);
 
 #endif /* NDEBUG */
 
-Hashtable* Hashtable_new(int size, bool owner);
+Hashtable* Hashtable_new(size_t size, bool owner);
 
 void Hashtable_delete(Hashtable* this);
 
-void Hashtable_put(Hashtable* this, unsigned int key, void* value);
+void Hashtable_clear(Hashtable* this);
 
-void* Hashtable_remove(Hashtable* this, unsigned int key);
+void Hashtable_setSize(Hashtable* this, size_t size);
 
-void* Hashtable_get(Hashtable* this, unsigned int key);
+void Hashtable_put(Hashtable* this, ht_key_t key, void* value);
+
+void* Hashtable_remove(Hashtable* this, ht_key_t key);
+
+void* Hashtable_get(Hashtable* this, ht_key_t key);
 
 void Hashtable_foreach(Hashtable* this, Hashtable_PairFunction f, void* userData);
 

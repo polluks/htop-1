@@ -11,9 +11,9 @@ This meter written by Ian P. Hands (iphands@gmail.com, ihands@redhat.com).
 
 #include <math.h>
 
-#include "Battery.h"
 #include "CRT.h"
 #include "Object.h"
+#include "Platform.h"
 #include "XUtils.h"
 
 
@@ -21,38 +21,35 @@ static const int BatteryMeter_attributes[] = {
    BATTERY
 };
 
-static void BatteryMeter_updateValues(Meter * this, char *buffer, int len) {
+static void BatteryMeter_updateValues(Meter* this) {
    ACPresence isOnAC;
    double percent;
 
-   Battery_getData(&percent, &isOnAC);
+   Platform_getBattery(&percent, &isOnAC);
 
    if (isnan(percent)) {
       this->values[0] = NAN;
-      xSnprintf(buffer, len, "n/a");
+      xSnprintf(this->txtBuffer, sizeof(this->txtBuffer), "N/A");
       return;
    }
 
    this->values[0] = percent;
 
-   const char *onAcText, *onBatteryText, *unknownText;
-
-   unknownText = "%.1f%%";
-   if (this->mode == TEXT_METERMODE) {
-      onAcText = "%.1f%% (Running on A/C)";
-      onBatteryText = "%.1f%% (Running on battery)";
-   } else {
-      onAcText = "%.1f%%(A/C)";
-      onBatteryText = "%.1f%%(bat)";
+   const char* text;
+   switch (isOnAC) {
+   case AC_PRESENT:
+      text = this->mode == TEXT_METERMODE ? " (Running on A/C)" : "(A/C)";
+      break;
+   case AC_ABSENT:
+      text = this->mode == TEXT_METERMODE ? " (Running on battery)" : "(bat)";
+      break;
+   case AC_ERROR:
+   default:
+      text = "";
+      break;
    }
 
-   if (isOnAC == AC_PRESENT) {
-      xSnprintf(buffer, len, onAcText, percent);
-   } else if (isOnAC == AC_ABSENT) {
-      xSnprintf(buffer, len, onBatteryText, percent);
-   } else {
-      xSnprintf(buffer, len, unknownText, percent);
-   }
+   xSnprintf(this->txtBuffer, sizeof(this->txtBuffer), "%.1f%%%s", percent, text);
 }
 
 const MeterClass BatteryMeter_class = {

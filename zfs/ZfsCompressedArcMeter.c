@@ -32,33 +32,33 @@ void ZfsCompressedArcMeter_readStats(Meter* this, const ZfsArcStats* stats) {
    }
 }
 
-static void ZfsCompressedArcMeter_printRatioString(const Meter* this, char* buffer, int size) {
-   xSnprintf(buffer, size, "%.2f:1", this->total/this->values[0]);
+static void ZfsCompressedArcMeter_printRatioString(const Meter* this, char* buffer, size_t size) {
+   xSnprintf(buffer, size, "%.2f:1", this->total / this->values[0]);
 }
 
-static void ZfsCompressedArcMeter_updateValues(Meter* this, char* buffer, int size) {
+static void ZfsCompressedArcMeter_updateValues(Meter* this) {
    Platform_setZfsCompressedArcValues(this);
 
-   ZfsCompressedArcMeter_printRatioString(this, buffer, size);
+   ZfsCompressedArcMeter_printRatioString(this, this->txtBuffer, sizeof(this->txtBuffer));
 }
 
 static void ZfsCompressedArcMeter_display(const Object* cast, RichString* out) {
-   char buffer[50];
    const Meter* this = (const Meter*)cast;
 
    if (this->values[0] > 0) {
-      Meter_humanUnit(buffer, this->total, 50);
-      RichString_append(out, CRT_colors[METER_VALUE], buffer);
-      RichString_append(out, CRT_colors[METER_TEXT], " Uncompressed, ");
-      Meter_humanUnit(buffer, this->values[0], 50);
-      RichString_append(out, CRT_colors[METER_VALUE], buffer);
-      RichString_append(out, CRT_colors[METER_TEXT], " Compressed, ");
-      ZfsCompressedArcMeter_printRatioString(this, buffer, 50);
-      RichString_append(out, CRT_colors[METER_VALUE], buffer);
-      RichString_append(out, CRT_colors[METER_TEXT], " Ratio");
+      char buffer[50];
+      Meter_humanUnit(buffer, this->total, sizeof(buffer));
+      RichString_appendAscii(out, CRT_colors[METER_VALUE], buffer);
+      RichString_appendAscii(out, CRT_colors[METER_TEXT], " Uncompressed, ");
+      Meter_humanUnit(buffer, this->values[0], sizeof(buffer));
+      RichString_appendAscii(out, CRT_colors[METER_VALUE], buffer);
+      RichString_appendAscii(out, CRT_colors[METER_TEXT], " Compressed, ");
+      ZfsCompressedArcMeter_printRatioString(this, buffer, sizeof(buffer));
+      RichString_appendAscii(out, CRT_colors[ZFS_RATIO], buffer);
+      RichString_appendAscii(out, CRT_colors[METER_TEXT], " Ratio");
    } else {
-      RichString_write(out, CRT_colors[METER_TEXT], " ");
-      RichString_append(out, CRT_colors[FAILED_SEARCH], "Compression Unavailable");
+      RichString_writeAscii(out, CRT_colors[METER_TEXT], " ");
+      RichString_appendAscii(out, CRT_colors[FAILED_READ], "Compression Unavailable");
    }
 }
 

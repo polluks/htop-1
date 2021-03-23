@@ -16,12 +16,15 @@ static void CommandScreen_scan(InfoScreen* this) {
    int idx = MAXIMUM(Panel_getSelectedIndex(panel), 0);
    Panel_prune(panel);
 
-   const char* p = this->process->comm;
-   char* line = xMalloc(COLS + 1);
+   const char* p = Process_getCommand(this->process);
+   char line[COLS + 1];
    int line_offset = 0, last_spc = -1, len;
    for (; *p != '\0'; p++, line_offset++) {
+      assert(line_offset >= 0 && (size_t)line_offset < sizeof(line));
       line[line_offset] = *p;
-      if (*p == ' ') last_spc = line_offset;
+      if (*p == ' ') {
+         last_spc = line_offset;
+      }
 
       if (line_offset == COLS) {
          len = (last_spc == -1) ? line_offset : last_spc;
@@ -39,12 +42,11 @@ static void CommandScreen_scan(InfoScreen* this) {
       InfoScreen_addLine(this, line);
    }
 
-   free(line);
    Panel_setSelected(panel, idx);
 }
 
 static void CommandScreen_draw(InfoScreen* this) {
-   InfoScreen_drawTitled(this, "Command of process %d - %s", this->process->pid, this->process->comm);
+   InfoScreen_drawTitled(this, "Command of process %d - %s", this->process->pid, Process_getCommand(this->process));
 }
 
 const InfoScreenClass CommandScreen_class = {
@@ -58,7 +60,7 @@ const InfoScreenClass CommandScreen_class = {
 
 CommandScreen* CommandScreen_new(Process* process) {
    CommandScreen* this = AllocThis(CommandScreen);
-   return (CommandScreen*) InfoScreen_init(&this->super, process, NULL, LINES - 3, " ");
+   return (CommandScreen*) InfoScreen_init(&this->super, process, NULL, LINES - 2, " ");
 }
 
 void CommandScreen_delete(Object* this) {

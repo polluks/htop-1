@@ -34,6 +34,9 @@ in the source distribution for its full text.
 #define MAX_READ 2048
 #endif
 
+typedef unsigned long long int memory_t;
+#define MEMORY_MAX ULLONG_MAX
+
 typedef struct ProcessList_ {
    const Settings* settings;
 
@@ -41,6 +44,9 @@ typedef struct ProcessList_ {
    Vector* processes2;
    Hashtable* processTable;
    UsersTable* usersTable;
+
+   Hashtable* displayTreeSet;
+   Hashtable* draftingTreeSet;
 
    Panel* panel;
    int following;
@@ -53,23 +59,25 @@ typedef struct ProcessList_ {
    bool topologyOk;
    #endif
 
-   int totalTasks;
-   int runningTasks;
-   int userlandThreads;
-   int kernelThreads;
+   unsigned int totalTasks;
+   unsigned int runningTasks;
+   unsigned int userlandThreads;
+   unsigned int kernelThreads;
 
-   unsigned long long int totalMem;
-   unsigned long long int usedMem;
-   unsigned long long int freeMem;
-   unsigned long long int sharedMem;
-   unsigned long long int buffersMem;
-   unsigned long long int cachedMem;
-   unsigned long long int totalSwap;
-   unsigned long long int usedSwap;
-   unsigned long long int freeSwap;
+   memory_t totalMem;
+   memory_t usedMem;
+   memory_t buffersMem;
+   memory_t cachedMem;
+   memory_t sharedMem;
+   memory_t availableMem;
 
-   int cpuCount;
+   memory_t totalSwap;
+   memory_t usedSwap;
+   memory_t cachedSwap;
 
+   unsigned int cpuCount;
+
+   time_t scanTs;
 } ProcessList;
 
 ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* pidMatchList, uid_t userId);
@@ -83,26 +91,32 @@ void ProcessList_done(ProcessList* this);
 
 void ProcessList_setPanel(ProcessList* this, Panel* panel);
 
-void ProcessList_printHeader(ProcessList* this, RichString* header);
+void ProcessList_printHeader(const ProcessList* this, RichString* header);
 
 void ProcessList_add(ProcessList* this, Process* p);
 
-void ProcessList_remove(ProcessList* this, Process* p);
+void ProcessList_remove(ProcessList* this, const Process* p);
 
 Process* ProcessList_get(ProcessList* this, int idx);
 
-int ProcessList_size(ProcessList* this);
+int ProcessList_size(const ProcessList* this);
 
 void ProcessList_sort(ProcessList* this);
 
-ProcessField ProcessList_keyAt(ProcessList* this, int at);
+ProcessField ProcessList_keyAt(const ProcessList* this, int at);
 
 void ProcessList_expandTree(ProcessList* this);
+
+void ProcessList_collapseAllBranches(ProcessList* this);
 
 void ProcessList_rebuildPanel(ProcessList* this);
 
 Process* ProcessList_getProcess(ProcessList* this, pid_t pid, bool* preExisting, Process_New constructor);
 
 void ProcessList_scan(ProcessList* this, bool pauseProcessUpdate);
+
+static inline Process* ProcessList_findProcess(ProcessList* this, pid_t pid) {
+   return (Process*) Hashtable_get(this->processTable, pid);
+}
 
 #endif

@@ -17,16 +17,16 @@ static const int UptimeMeter_attributes[] = {
    UPTIME
 };
 
-static void UptimeMeter_updateValues(Meter* this, char* buffer, int len) {
+static void UptimeMeter_updateValues(Meter* this) {
    int totalseconds = Platform_getUptime();
    if (totalseconds == -1) {
-      xSnprintf(buffer, len, "(unknown)");
+      xSnprintf(this->txtBuffer, sizeof(this->txtBuffer), "(unknown)");
       return;
    }
    int seconds = totalseconds % 60;
-   int minutes = (totalseconds/60) % 60;
-   int hours = (totalseconds/3600) % 24;
-   int days = (totalseconds/86400);
+   int minutes = (totalseconds / 60) % 60;
+   int hours = (totalseconds / 3600) % 24;
+   int days = (totalseconds / 86400);
    this->values[0] = days;
    if (days > this->total) {
       this->total = days;
@@ -41,7 +41,7 @@ static void UptimeMeter_updateValues(Meter* this, char* buffer, int len) {
    } else {
       daysbuf[0] = '\0';
    }
-   xSnprintf(buffer, len, "%s%02d:%02d:%02d", daysbuf, hours, minutes, seconds);
+   xSnprintf(this->txtBuffer, sizeof(this->txtBuffer), "%s%02d:%02d:%02d", daysbuf, hours, minutes, seconds);
 }
 
 const MeterClass UptimeMeter_class = {

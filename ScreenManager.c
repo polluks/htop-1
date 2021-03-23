@@ -20,14 +20,13 @@ in the source distribution for its full text.
 #include "XUtils.h"
 
 
-ScreenManager* ScreenManager_new(int x1, int y1, int x2, int y2, Orientation orientation, Header* header, const Settings* settings, const State* state, bool owner) {
+ScreenManager* ScreenManager_new(Header* header, const Settings* settings, const State* state, bool owner) {
    ScreenManager* this;
    this = xMalloc(sizeof(ScreenManager));
-   this->x1 = x1;
-   this->y1 = y1;
-   this->x2 = x2;
-   this->y2 = y2;
-   this->orientation = orientation;
+   this->x1 = 0;
+   this->y1 = header->height;
+   this->x2 = 0;
+   this->y2 = -1;
    this->panels = Vector_new(Class(Panel), owner, DEFAULT_SIZE);
    this->panelCount = 0;
    this->header = header;
@@ -43,26 +42,23 @@ void ScreenManager_delete(ScreenManager* this) {
    free(this);
 }
 
-inline int ScreenManager_size(ScreenManager* this) {
+inline int ScreenManager_size(const ScreenManager* this) {
    return this->panelCount;
 }
 
 void ScreenManager_add(ScreenManager* this, Panel* item, int size) {
-   if (this->orientation == HORIZONTAL) {
-      int lastX = 0;
-      if (this->panelCount > 0) {
-         Panel* last = (Panel*) Vector_get(this->panels, this->panelCount - 1);
-         lastX = last->x + last->w + 1;
-      }
-      int height = LINES - this->y1 + this->y2;
-      if (size > 0) {
-         Panel_resize(item, size, height);
-      } else {
-         Panel_resize(item, COLS-this->x1+this->x2-lastX, height);
-      }
-      Panel_move(item, lastX, this->y1);
+   int lastX = 0;
+   if (this->panelCount > 0) {
+      const Panel* last = (const Panel*) Vector_get(this->panels, this->panelCount - 1);
+      lastX = last->x + last->w + 1;
    }
-   // TODO: VERTICAL
+   int height = LINES - this->y1 + this->y2;
+   if (size > 0) {
+      Panel_resize(item, size, height);
+   } else {
+      Panel_resize(item, COLS - this->x1 + this->x2 - lastX, height);
+   }
+   Panel_move(item, lastX, this->y1);
    Vector_add(this->panels, item);
    item->needsRedraw = true;
    this->panelCount++;
@@ -81,34 +77,38 @@ void ScreenManager_resize(ScreenManager* this, int x1, int y1, int x2, int y2) {
    this->x2 = x2;
    this->y2 = y2;
    int panels = this->panelCount;
-   if (this->orientation == HORIZONTAL) {
-      int lastX = 0;
-      for (int i = 0; i < panels - 1; i++) {
-         Panel* panel = (Panel*) Vector_get(this->panels, i);
-         Panel_resize(panel, panel->w, LINES-y1+y2);
-         Panel_move(panel, lastX, y1);
-         lastX = panel->x + panel->w + 1;
-      }
-      Panel* panel = (Panel*) Vector_get(this->panels, panels-1);
-      Panel_resize(panel, COLS-x1+x2-lastX, LINES-y1+y2);
+   int lastX = 0;
+   for (int i = 0; i < panels - 1; i++) {
+      Panel* panel = (Panel*) Vector_get(this->panels, i);
+      Panel_resize(panel, panel->w, LINES - y1 + y2);
       Panel_move(panel, lastX, y1);
+      lastX = panel->x + panel->w + 1;
    }
-   // TODO: VERTICAL
+   Panel* panel = (Panel*) Vector_get(this->panels, panels - 1);
+   Panel_resize(panel, COLS - x1 + x2 - lastX, LINES - y1 + y2);
+   Panel_move(panel, lastX, y1);
 }
 
-static void checkRecalculation(ScreenManager* this, double* oldTime, int* sortTimeout, bool* redraw, bool *rescan, bool *timedOut) {
+static void checkRecalculation(ScreenManager* this, double* oldTime, int* sortTimeout, bool* redraw, bool* rescan, bool* timedOut) {
    ProcessList* pl = this->header->pl;
 
    struct timeval tv;
    gettimeofday(&tv, NULL);
    double newTime = ((double)tv.tv_sec * 10) + ((double)tv.tv_usec / 100000);
+
    *timedOut = (newTime - *oldTime > this->settings->delay);
-   *rescan = *rescan || *timedOut;
-   if (newTime < *oldTime) *rescan = true; // clock was adjusted?
+   *rescan |= *timedOut;
+
+   if (newTime < *oldTime) {
+      *rescan = true; // clock was adjusted?
+   }
+
    if (*rescan) {
       *oldTime = newTime;
+      // always update header, especially to avoid gaps in graph meters
+      Header_updateData(this->header);
       ProcessList_scan(pl, this->state->pauseProcessUpdate);
-      if (*sortTimeout == 0 || this->settings->treeView) {
+      if (!this->state->pauseProcessUpdate && (*sortTimeout == 0 || this->settings->treeView)) {
          ProcessList_sort(pl);
          *sortTimeout = 1;
       }
@@ -121,30 +121,24 @@ static void checkRecalculation(ScreenManager* this, double* oldTime, int* sortTi
    *rescan = false;
 }
 
-static void ScreenManager_drawPanels(ScreenManager* this, int focus) {
+static void ScreenManager_drawPanels(ScreenManager* this, int focus, bool force_redraw) {
    const int nPanels = this->panelCount;
    for (int i = 0; i < nPanels; i++) {
       Panel* panel = (Panel*) Vector_get(this->panels, i);
-      Panel_draw(panel, i == focus);
-      if (this->orientation == HORIZONTAL) {
-         mvvline(panel->y, panel->x+panel->w, ' ', panel->h+1);
-      }
+      Panel_draw(panel,
+                 force_redraw,
+                 i == focus,
+                 panel != (Panel*)this->state->mainPanel || !this->state->hideProcessSelection,
+                 State_hideFunctionBar(this->state));
+      mvvline(panel->y, panel->x + panel->w, ' ', panel->h + (State_hideFunctionBar(this->state) ? 1 : 0));
    }
-}
-
-static Panel* setCurrentPanel(const ScreenManager* this, Panel* panel) {
-   FunctionBar_draw(panel->currentBar);
-   if (panel == this->state->panel && this->state->pauseProcessUpdate)
-      FunctionBar_append("PAUSED", CRT_colors[PAUSED]);
-
-   return panel;
 }
 
 void ScreenManager_run(ScreenManager* this, Panel** lastFocus, int* lastKey) {
    bool quit = false;
    int focus = 0;
 
-   Panel* panelFocus = setCurrentPanel(this, (Panel*) Vector_get(this->panels, focus));
+   Panel* panelFocus = (Panel*) Vector_get(this->panels, focus);
 
    double oldTime = 0.0;
 
@@ -153,6 +147,7 @@ void ScreenManager_run(ScreenManager* this, Panel** lastFocus, int* lastKey) {
 
    bool timedOut = true;
    bool redraw = true;
+   bool force_redraw = true;
    bool rescan = false;
    int sortTimeout = 0;
    int resetSortTimeout = 5;
@@ -162,8 +157,9 @@ void ScreenManager_run(ScreenManager* this, Panel** lastFocus, int* lastKey) {
          checkRecalculation(this, &oldTime, &sortTimeout, &redraw, &rescan, &timedOut);
       }
 
-      if (redraw) {
-         ScreenManager_drawPanels(this, focus);
+      if (redraw || force_redraw) {
+         ScreenManager_drawPanels(this, focus, force_redraw);
+         force_redraw = false;
       }
 
       int prevCh = ch;
@@ -182,16 +178,16 @@ void ScreenManager_run(ScreenManager* this, Panel** lastFocus, int* lastKey) {
                } else {
                   for (int i = 0; i < this->panelCount; i++) {
                      Panel* panel = (Panel*) Vector_get(this->panels, i);
-                     if (mevent.x >= panel->x && mevent.x <= panel->x+panel->w) {
+                     if (mevent.x >= panel->x && mevent.x <= panel->x + panel->w) {
                         if (mevent.y == panel->y) {
                            ch = EVENT_HEADER_CLICK(mevent.x - panel->x);
                            break;
-                        } else if (mevent.y > panel->y && mevent.y <= panel->y+panel->h) {
+                        } else if (mevent.y > panel->y && mevent.y <= panel->y + panel->h) {
                            ch = KEY_MOUSE;
                            if (panel == panelFocus || this->allowFocusChange) {
                               focus = i;
-                              panelFocus = setCurrentPanel(this, panel);
-                              Object* oldSelection = Panel_getSelected(panel);
+                              panelFocus = panel;
+                              const Object* oldSelection = Panel_getSelected(panel);
                               Panel_setSelected(panel, mevent.y - panel->y + panel->scrollV - 1);
                               if (Panel_getSelected(panel) == oldSelection) {
                                  ch = KEY_RECLICK;
@@ -212,14 +208,16 @@ void ScreenManager_run(ScreenManager* this, Panel** lastFocus, int* lastKey) {
          }
       }
       if (ch == ERR) {
-         sortTimeout--;
+         if (sortTimeout > 0)
+            sortTimeout--;
          if (prevCh == ch && !timedOut) {
             closeTimeout++;
             if (closeTimeout == 100) {
                break;
             }
-         } else
+         } else {
             closeTimeout = 0;
+         }
          redraw = false;
          continue;
       }
@@ -236,8 +234,11 @@ void ScreenManager_run(ScreenManager* this, Panel** lastFocus, int* lastKey) {
       if (result & SYNTH_KEY) {
          ch = result >> 16;
       }
-      if (result & REDRAW) {
+      if (result & REFRESH) {
          sortTimeout = 0;
+      }
+      if (result & REDRAW) {
+         force_redraw = true;
       }
       if (result & RESCAN) {
          rescan = true;
@@ -261,14 +262,21 @@ void ScreenManager_run(ScreenManager* this, Panel** lastFocus, int* lastKey) {
          if (this->panelCount < 2) {
             goto defaultHandler;
          }
-         if (!this->allowFocusChange)
+
+         if (!this->allowFocusChange) {
             break;
-         tryLeft:
-         if (focus > 0)
+         }
+
+tryLeft:
+         if (focus > 0) {
             focus--;
-         panelFocus = setCurrentPanel(this, (Panel*) Vector_get(this->panels, focus));
-         if (Panel_size(panelFocus) == 0 && focus > 0)
+         }
+
+         panelFocus = (Panel*) Vector_get(this->panels, focus);
+         if (Panel_size(panelFocus) == 0 && focus > 0) {
             goto tryLeft;
+         }
+
          break;
       case KEY_RIGHT:
       case KEY_CTRL('F'):
@@ -276,30 +284,39 @@ void ScreenManager_run(ScreenManager* this, Panel** lastFocus, int* lastKey) {
          if (this->panelCount < 2) {
             goto defaultHandler;
          }
-         if (!this->allowFocusChange)
+         if (!this->allowFocusChange) {
             break;
-         tryRight:
-         if (focus < this->panelCount - 1)
+         }
+
+tryRight:
+         if (focus < this->panelCount - 1) {
             focus++;
-         panelFocus = setCurrentPanel(this, (Panel*) Vector_get(this->panels, focus));
-         if (Panel_size(panelFocus) == 0 && focus < this->panelCount - 1)
+         }
+
+         panelFocus = (Panel*) Vector_get(this->panels, focus);
+         if (Panel_size(panelFocus) == 0 && focus < this->panelCount - 1) {
             goto tryRight;
+         }
+
          break;
-      case KEY_F(10):
-      case 'q':
       case 27:
+      case 'q':
+      case KEY_F(10):
          quit = true;
          continue;
       default:
-         defaultHandler:
+defaultHandler:
          sortTimeout = resetSortTimeout;
          Panel_onKey(panelFocus, ch);
          break;
       }
    }
 
-   if (lastFocus)
+   if (lastFocus) {
       *lastFocus = panelFocus;
-   if (lastKey)
+   }
+
+   if (lastKey) {
       *lastKey = ch;
+   }
 }

@@ -53,7 +53,7 @@ static HandlerResult AvailableColumnsPanel_eventHandler(Panel* super, int ch) {
       }
       default:
       {
-         if (0 < ch && ch < 255 && isalpha((unsigned char)ch))
+         if (0 < ch && ch < 255 && isgraph((unsigned char)ch))
             result = Panel_selectByTyping(super, ch);
          break;
       }
@@ -77,7 +77,7 @@ AvailableColumnsPanel* AvailableColumnsPanel_new(Panel* columns) {
 
    Panel_setHeader(super, "Available Columns");
 
-   for (int i = 1; i < Platform_numberOfFields; i++) {
+   for (int i = 1; i < LAST_PROCESSFIELD; i++) {
       if (i != COMM && Process_fields[i].description) {
          char description[256];
          xSnprintf(description, sizeof(description), "%s - %s", Process_fields[i].name, Process_fields[i].description);

@@ -24,7 +24,7 @@ typedef struct MainPanel_ {
    Panel super;
    State* state;
    IncSet* inc;
-   Htop_Action *keys;
+   Htop_Action* keys;
    pid_t pidSearch;
 } MainPanel;
 
@@ -37,8 +37,6 @@ void MainPanel_updateTreeFunctions(MainPanel* this, bool mode);
 void MainPanel_pidSearch(MainPanel* this, int ch);
 
 int MainPanel_selectedPid(MainPanel* this);
-
-const char* MainPanel_getValue(MainPanel* this, int i);
 
 bool MainPanel_foreachProcess(MainPanel* this, MainPanel_ForeachProcessFn fn, Arg arg, bool* wasAnyTagged);
 

@@ -11,7 +11,6 @@ in the source distribution for its full text.
 
 #include "Object.h"
 #include "Process.h"
-#include "RichString.h"
 #include "Settings.h"
 
 
@@ -19,23 +18,16 @@ in the source distribution for its full text.
 
 extern const char* const nodevStr;
 
-typedef enum FreeBSDProcessFields_ {
-   // Add platform-specific fields here, with ids >= 100
-   JID   = 100,
-   JAIL  = 101,
-   LAST_PROCESSFIELD = 102,
-} FreeBSDProcessField;
-
 typedef struct FreeBSDProcess_ {
    Process super;
-   int   kernel;
+   bool  isKernelThread;
    int   jid;
    char* jname;
    const char* ttyPath;
 } FreeBSDProcess;
 
 static inline bool Process_isKernelThread(const Process* this) {
-   return ((const FreeBSDProcess*)this)->kernel == 1;
+   return ((const FreeBSDProcess*)this)->isKernelThread;
 }
 
 static inline bool Process_isUserlandThread(const Process* this) {
@@ -44,9 +36,7 @@ static inline bool Process_isUserlandThread(const Process* this) {
 
 extern const ProcessClass FreeBSDProcess_class;
 
-extern ProcessFieldData Process_fields[];
-
-extern ProcessPidColumn Process_pidColumns[];
+extern const ProcessFieldData Process_fields[LAST_PROCESSFIELD];
 
 Process* FreeBSDProcess_new(const Settings* settings);
 

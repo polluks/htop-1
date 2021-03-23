@@ -8,32 +8,35 @@ Released under the GNU GPLv2, see the COPYING file
 in the source distribution for its full text.
 */
 
-typedef enum OpenBSDProcessFields_ {
-   // Add platform-specific fields here, with ids >= 100
-   LAST_PROCESSFIELD = 100,
-} OpenBSDProcessField;
+#include <stdbool.h>
+
+#include "Object.h"
+#include "Process.h"
+#include "Settings.h"
+
 
 typedef struct OpenBSDProcess_ {
    Process super;
+
+   /* 'Kernel virtual addr of u-area' to detect main threads */
+   uint64_t addr;
 } OpenBSDProcess;
 
-#define Process_isKernelThread(_process) (_process->pgrp == 0)
+static inline bool Process_isKernelThread(const Process* this) {
+   return this->pgrp == 0;
+}
 
-#define Process_isUserlandThread(_process) (_process->pid != _process->tgid)
+static inline bool Process_isUserlandThread(const Process* this) {
+   return this->pid != this->tgid;
+}
 
 extern const ProcessClass OpenBSDProcess_class;
 
-extern ProcessFieldData Process_fields[];
-
-extern ProcessPidColumn Process_pidColumns[];
+extern const ProcessFieldData Process_fields[LAST_PROCESSFIELD];
 
 Process* OpenBSDProcess_new(const Settings* settings);
 
 void Process_delete(Object* cast);
-
-void OpenBSDProcess_writeField(const Process* this, RichString* str, ProcessField field);
-
-long OpenBSDProcess_compare(const void* v1, const void* v2);
 
 bool Process_isThread(const Process* this);
 

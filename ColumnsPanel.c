@@ -14,7 +14,6 @@ in the source distribution for its full text.
 #include "FunctionBar.h"
 #include "ListItem.h"
 #include "Object.h"
-#include "Platform.h"
 #include "Process.h"
 #include "ProvideCurses.h"
 #include "XUtils.h"
@@ -45,7 +44,7 @@ static HandlerResult ColumnsPanel_eventHandler(Panel* super, int ch) {
       {
          if (selected < size - 1) {
             this->moving = !(this->moving);
-            Panel_setSelectionColor(super, this->moving ? CRT_colors[PANEL_SELECTION_FOLLOW] : CRT_colors[PANEL_SELECTION_FOCUS]);
+            Panel_setSelectionColor(super, this->moving ? PANEL_SELECTION_FOLLOW : PANEL_SELECTION_FOCUS);
             ListItem* selectedItem = (ListItem*) Panel_getSelected(super);
             if (selectedItem)
                selectedItem->moving = this->moving;
@@ -96,7 +95,7 @@ static HandlerResult ColumnsPanel_eventHandler(Panel* super, int ch) {
       }
       default:
       {
-         if (0 < ch && ch < 255 && isalpha((unsigned char)ch))
+         if (0 < ch && ch < 255 && isgraph((unsigned char)ch))
             result = Panel_selectByTyping(super, ch);
          if (result == BREAK_LOOP)
             result = IGNORED;
@@ -126,7 +125,7 @@ ColumnsPanel* ColumnsPanel_new(Settings* settings) {
    this->moving = false;
    Panel_setHeader(super, "Active Columns");
 
-   ProcessField* fields = this->settings->fields;
+   const ProcessField* fields = this->settings->fields;
    for (; *fields; fields++) {
       if (Process_fields[*fields].name) {
          Panel_add(super, (Object*) ListItem_new(Process_fields[*fields].name, *fields));
@@ -139,7 +138,7 @@ void ColumnsPanel_update(Panel* super) {
    ColumnsPanel* this = (ColumnsPanel*) super;
    int size = Panel_size(super);
    this->settings->changed = true;
-   this->settings->fields = xRealloc(this->settings->fields, sizeof(ProcessField) * (size+1));
+   this->settings->fields = xRealloc(this->settings->fields, sizeof(ProcessField) * (size + 1));
    this->settings->flags = 0;
    for (int i = 0; i < size; i++) {
       int key = ((ListItem*) Panel_get(super, i))->key;

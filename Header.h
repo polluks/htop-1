@@ -15,7 +15,7 @@ in the source distribution for its full text.
 typedef struct Header_ {
    Vector** columns;
    Settings* settings;
-   struct ProcessList_* pl;
+   ProcessList* pl;
    int nrColumns;
    int pad;
    int height;
@@ -23,7 +23,7 @@ typedef struct Header_ {
 
 #define Header_forEachColumn(this_, i_) for (int (i_)=0; (i_) < (this_)->nrColumns; ++(i_))
 
-Header* Header_new(struct ProcessList_* pl, Settings* settings, int nrColumns);
+Header* Header_new(ProcessList* pl, Settings* settings, int nrColumns);
 
 void Header_delete(Header* this);
 
@@ -31,21 +31,21 @@ void Header_populateFromSettings(Header* this);
 
 void Header_writeBackToSettings(const Header* this);
 
-MeterModeId Header_addMeterByName(Header* this, char* name, int column);
+MeterModeId Header_addMeterByName(Header* this, const char* name, int column);
 
 void Header_setMode(Header* this, int i, MeterModeId mode, int column);
 
-Meter* Header_addMeterByClass(Header* this, const MeterClass* type, int param, int column);
+Meter* Header_addMeterByClass(Header* this, const MeterClass* type, unsigned int param, int column);
 
-int Header_size(Header* this, int column);
+int Header_size(const Header* this, int column);
 
-char* Header_readMeterName(Header* this, int i, int column);
-
-MeterModeId Header_readMeterMode(Header* this, int i, int column);
+MeterModeId Header_readMeterMode(const Header* this, int i, int column);
 
 void Header_reinit(Header* this);
 
 void Header_draw(const Header* this);
+
+void Header_updateData(Header* this);
 
 int Header_calculateHeight(Header* this);
 

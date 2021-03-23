@@ -30,12 +30,11 @@ static void AvailableMetersPanel_delete(Object* object) {
    free(this);
 }
 
-static inline void AvailableMetersPanel_addMeter(Header* header, Panel* panel, const MeterClass* type, int param, int column) {
-   Meter* meter = Header_addMeterByClass(header, type, param, column);
+static inline void AvailableMetersPanel_addMeter(Header* header, Panel* panel, const MeterClass* type, unsigned int param, int column) {
+   const Meter* meter = Header_addMeterByClass(header, type, param, column);
    Panel_add(panel, (Object*) Meter_toListItem(meter, false));
    Panel_setSelected(panel, Panel_size(panel) - 1);
    MetersPanel_setMoving((MetersPanel*)panel, true);
-   FunctionBar_draw(panel->currentBar);
 }
 
 static HandlerResult AvailableMetersPanel_eventHandler(Panel* super, int ch) {
@@ -46,7 +45,7 @@ static HandlerResult AvailableMetersPanel_eventHandler(Panel* super, int ch) {
    if (!selected)
       return IGNORED;
 
-   int param = selected->key & 0xff;
+   unsigned int param = selected->key & 0xff;
    int type = selected->key >> 16;
    HandlerResult result = IGNORED;
    bool update = false;
@@ -77,6 +76,7 @@ static HandlerResult AvailableMetersPanel_eventHandler(Panel* super, int ch) {
    if (update) {
       this->settings->changed = true;
       Header_calculateHeight(header);
+      Header_updateData(header);
       Header_draw(header);
       ScreenManager_resize(this->scr, this->scr->x1, header->height, this->scr->x2, this->scr->y2);
    }
@@ -91,7 +91,7 @@ const PanelClass AvailableMetersPanel_class = {
    .eventHandler = AvailableMetersPanel_eventHandler
 };
 
-AvailableMetersPanel* AvailableMetersPanel_new(Settings* settings, Header* header, Panel* leftMeters, Panel* rightMeters, ScreenManager* scr, ProcessList* pl) {
+AvailableMetersPanel* AvailableMetersPanel_new(Settings* settings, Header* header, Panel* leftMeters, Panel* rightMeters, ScreenManager* scr, const ProcessList* pl) {
    AvailableMetersPanel* this = AllocThis(AvailableMetersPanel);
    Panel* super = (Panel*) this;
    FunctionBar* fuBar = FunctionBar_newEnterEsc("Add   ", "Done   ");
@@ -114,12 +114,12 @@ AvailableMetersPanel* AvailableMetersPanel_new(Settings* settings, Header* heade
    }
    // Handle (&CPUMeter_class)
    const MeterClass* type = &CPUMeter_class;
-   int cpus = pl->cpuCount;
+   unsigned int cpus = pl->cpuCount;
    if (cpus > 1) {
       Panel_add(super, (Object*) ListItem_new("CPU average", 0));
-      for (int i = 1; i <= cpus; i++) {
+      for (unsigned int i = 1; i <= cpus; i++) {
          char buffer[50];
-         xSnprintf(buffer, 50, "%s %d", type->uiName, Settings_cpuId(this->settings, i - 1));
+         xSnprintf(buffer, sizeof(buffer), "%s %d", type->uiName, Settings_cpuId(this->settings, i - 1));
          Panel_add(super, (Object*) ListItem_new(buffer, i));
       }
    } else {

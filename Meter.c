@@ -20,6 +20,7 @@ in the source distribution for its full text.
 #include "Object.h"
 #include "ProvideCurses.h"
 #include "RichString.h"
+#include "Settings.h"
 #include "XUtils.h"
 
 
@@ -31,28 +32,30 @@ const MeterClass Meter_class = {
    }
 };
 
-Meter* Meter_new(const struct ProcessList_* pl, int param, const MeterClass* type) {
+Meter* Meter_new(const struct ProcessList_* pl, unsigned int param, const MeterClass* type) {
    Meter* this = xCalloc(1, sizeof(Meter));
    Object_setClass(this, type);
    this->h = 1;
    this->param = param;
    this->pl = pl;
    this->curItems = type->maxItems;
+   this->curAttributes = NULL;
    this->values = type->maxItems ? xCalloc(type->maxItems, sizeof(double)) : NULL;
    this->total = type->total;
    this->caption = xStrdup(type->caption);
-   if (Meter_initFn(this))
+   if (Meter_initFn(this)) {
       Meter_init(this);
+   }
    Meter_setMode(this, type->defaultMode);
    return this;
 }
 
-int Meter_humanUnit(char* buffer, unsigned long int value, int size) {
-   const char * prefix = "KMGTPEZY";
+int Meter_humanUnit(char* buffer, unsigned long int value, size_t size) {
+   const char* prefix = "KMGTPEZY";
    unsigned long int powi = 1;
-   unsigned int written, powj = 1, precision = 2;
+   unsigned int powj = 1, precision = 2;
 
-   for(;;) {
+   for (;;) {
       if (value / 1024 < powi)
          break;
 
@@ -72,15 +75,13 @@ int Meter_humanUnit(char* buffer, unsigned long int value, int size) {
          break;
    }
 
-   written = snprintf(buffer, size, "%.*f%c",
-      precision, (double) value / powi, *prefix);
-
-   return written;
+   return snprintf(buffer, size, "%.*f%c", precision, (double) value / powi, *prefix);
 }
 
 void Meter_delete(Object* cast) {
    if (!cast)
       return;
+
    Meter* this = (Meter*) cast;
    if (Meter_doneFn(this)) {
       Meter_done(this);
@@ -92,28 +93,32 @@ void Meter_delete(Object* cast) {
 }
 
 void Meter_setCaption(Meter* this, const char* caption) {
-   free(this->caption);
-   this->caption = xStrdup(caption);
+   free_and_xStrdup(&this->caption, caption);
 }
 
-static inline void Meter_displayBuffer(const Meter* this, const char* buffer, RichString* out) {
+static inline void Meter_displayBuffer(const Meter* this, RichString* out) {
    if (Object_displayFn(this)) {
       Object_display(this, out);
    } else {
-      RichString_write(out, CRT_colors[Meter_attributes(this)[0]], buffer);
+      RichString_writeWide(out, CRT_colors[Meter_attributes(this)[0]], this->txtBuffer);
    }
 }
 
 void Meter_setMode(Meter* this, int modeIndex) {
-   if (modeIndex > 0 && modeIndex == this->mode)
+   if (modeIndex > 0 && modeIndex == this->mode) {
       return;
-   if (!modeIndex)
+   }
+
+   if (!modeIndex) {
       modeIndex = 1;
+   }
+
    assert(modeIndex < LAST_METERMODE);
    if (Meter_defaultMode(this) == CUSTOM_METERMODE) {
       this->draw = Meter_drawFn(this);
-      if (Meter_updateModeFn(this))
+      if (Meter_updateModeFn(this)) {
          Meter_updateMode(this, modeIndex);
+      }
    } else {
       assert(modeIndex >= 1);
       free(this->drawData);
@@ -126,19 +131,21 @@ void Meter_setMode(Meter* this, int modeIndex) {
    this->mode = modeIndex;
 }
 
-ListItem* Meter_toListItem(Meter* this, bool moving) {
-   char mode[21];
-   if (this->mode)
-      xSnprintf(mode, 20, " [%s]", Meter_modes[this->mode]->uiName);
-   else
+ListItem* Meter_toListItem(const Meter* this, bool moving) {
+   char mode[20];
+   if (this->mode) {
+      xSnprintf(mode, sizeof(mode), " [%s]", Meter_modes[this->mode]->uiName);
+   } else {
       mode[0] = '\0';
-   char number[11];
-   if (this->param > 0)
-      xSnprintf(number, 10, " %d", this->param);
-   else
+   }
+   char number[10];
+   if (this->param > 0) {
+      xSnprintf(number, sizeof(number), " %u", this->param);
+   } else {
       number[0] = '\0';
-   char buffer[51];
-   xSnprintf(buffer, 50, "%s%s%s", Meter_uiName(this), number, mode);
+   }
+   char buffer[50];
+   xSnprintf(buffer, sizeof(buffer), "%s%s%s", Meter_uiName(this), number, mode);
    ListItem* li = ListItem_new(buffer, 0);
    li->moving = moving;
    return li;
@@ -146,20 +153,21 @@ ListItem* Meter_toListItem(Meter* this, bool moving) {
 
 /* ---------- TextMeterMode ---------- */
 
-static void TextMeterMode_draw(Meter* this, int x, int y, int w) {
-   char buffer[METER_BUFFER_LEN];
-   Meter_updateValues(this, buffer, METER_BUFFER_LEN - 1);
-   (void) w;
-
+static void TextMeterMode_draw(Meter* this, int x, int y, ATTR_UNUSED int w) {
    attrset(CRT_colors[METER_TEXT]);
-   mvaddstr(y, x, this->caption);
+   mvaddnstr(y, x, this->caption, w - 1);
+   attrset(CRT_colors[RESET_COLOR]);
+
    int captionLen = strlen(this->caption);
    x += captionLen;
-   attrset(CRT_colors[RESET_COLOR]);
+   w -= captionLen;
+   if (w <= 0)
+      return;
+
    RichString_begin(out);
-   Meter_displayBuffer(this, buffer, &out);
-   RichString_printVal(out, y, x);
-   RichString_end(out);
+   Meter_displayBuffer(this, &out);
+   RichString_printoffnVal(out, y, x, 0, w - 1);
+   RichString_delete(&out);
 }
 
 /* ---------- BarMeterMode ---------- */
@@ -167,9 +175,6 @@ static void TextMeterMode_draw(Meter* this, int x, int y, int w) {
 static const char BarMeterMode_characters[] = "|#*@$%&.";
 
 static void BarMeterMode_draw(Meter* this, int x, int y, int w) {
-   char buffer[METER_BUFFER_LEN];
-   Meter_updateValues(this, buffer, METER_BUFFER_LEN - 1);
-
    w -= 2;
    attrset(CRT_colors[METER_TEXT]);
    int captionLen = 3;
@@ -178,20 +183,41 @@ static void BarMeterMode_draw(Meter* this, int x, int y, int w) {
    w -= captionLen;
    attrset(CRT_colors[BAR_BORDER]);
    mvaddch(y, x, '[');
-   mvaddch(y, x + w, ']');
+   mvaddch(y, x + MAXIMUM(w, 0), ']');
+   attrset(CRT_colors[RESET_COLOR]);
 
    w--;
    x++;
 
-   if (w < 1) {
-      attrset(CRT_colors[RESET_COLOR]);
+   if (w < 1)
       return;
+
+   // The text in the bar is right aligned;
+   // Pad with maximal spaces and then calculate needed starting position offset
+   RichString_begin(bar);
+   RichString_appendChr(&bar, 0, ' ', w);
+   RichString_appendWide(&bar, 0, this->txtBuffer);
+   int startPos = RichString_sizeVal(bar) - w;
+   if (startPos > w) {
+      // Text is too large for bar
+      // Truncate meter text at a space character
+      for (int pos = 2 * w; pos > w; pos--) {
+         if (RichString_getCharVal(bar, pos) == ' ') {
+            while (pos > w && RichString_getCharVal(bar, pos - 1) == ' ')
+               pos--;
+            startPos = pos - w;
+            break;
+         }
+      }
+
+      // If still too large, print the start not the end
+      startPos = MINIMUM(startPos, w);
    }
-   char bar[w + 1];
+   assert(startPos >= 0);
+   assert(startPos <= w);
+   assert(startPos + w <= RichString_sizeVal(bar));
 
    int blockSizes[10];
-
-   xSnprintf(bar, w + 1, "%*.*s", w, w, buffer);
 
    // First draw in the bar[] buffer...
    int offset = 0;
@@ -199,7 +225,7 @@ static void BarMeterMode_draw(Meter* this, int x, int y, int w) {
       double value = this->values[i];
       value = CLAMP(value, 0.0, this->total);
       if (value > 0) {
-         blockSizes[i] = ceil((value/this->total) * w);
+         blockSizes[i] = ceil((value / this->total) * w);
       } else {
          blockSizes[i] = 0;
       }
@@ -207,11 +233,11 @@ static void BarMeterMode_draw(Meter* this, int x, int y, int w) {
       // (Control against invalid values)
       nextOffset = CLAMP(nextOffset, 0, w);
       for (int j = offset; j < nextOffset; j++)
-         if (bar[j] == ' ') {
+         if (RichString_getCharVal(bar, startPos + j) == ' ') {
             if (CRT_colorScheme == COLORSCHEME_MONOCHROME) {
-               bar[j] = BarMeterMode_characters[i];
+               RichString_setChar(&bar, startPos + j, BarMeterMode_characters[i]);
             } else {
-               bar[j] = '|';
+               RichString_setChar(&bar, startPos + j, '|');
             }
          }
       offset = nextOffset;
@@ -220,15 +246,18 @@ static void BarMeterMode_draw(Meter* this, int x, int y, int w) {
    // ...then print the buffer.
    offset = 0;
    for (uint8_t i = 0; i < this->curItems; i++) {
-      attrset(CRT_colors[Meter_attributes(this)[i]]);
-      mvaddnstr(y, x + offset, bar + offset, blockSizes[i]);
+      int attr = this->curAttributes ? this->curAttributes[i] : Meter_attributes(this)[i];
+      RichString_setAttrn(&bar, CRT_colors[attr], startPos + offset, blockSizes[i]);
+      RichString_printoffnVal(bar, y, x + offset, startPos + offset, MINIMUM(blockSizes[i], w - offset));
       offset += blockSizes[i];
       offset = CLAMP(offset, 0, w);
    }
    if (offset < w) {
-      attrset(CRT_colors[BAR_SHADOW]);
-      mvaddnstr(y, x + offset, bar + offset, w - offset);
+      RichString_setAttrn(&bar, CRT_colors[BAR_SHADOW], startPos + offset, w - offset);
+      RichString_printoffnVal(bar, y, x + offset, startPos + offset, w - offset);
    }
+
+   RichString_delete(&bar);
 
    move(y, x + w + 1);
    attrset(CRT_colors[RESET_COLOR]);
@@ -256,15 +285,16 @@ static const char* const GraphMeterMode_dotsAscii[] = {
    /*20*/":", /*21*/":", /*22*/":"
 };
 
-static const char* const* GraphMeterMode_dots;
-static int GraphMeterMode_pixPerRow;
-
 static void GraphMeterMode_draw(Meter* this, int x, int y, int w) {
 
-   if (!this->drawData) this->drawData = xCalloc(1, sizeof(GraphData));
+   if (!this->drawData) {
+      this->drawData = xCalloc(1, sizeof(GraphData));
+   }
    GraphData* data = this->drawData;
-   const int nValues = METER_BUFFER_LEN;
+   const int nValues = METER_GRAPHDATA_SIZE;
 
+   const char* const* GraphMeterMode_dots;
+   int GraphMeterMode_pixPerRow;
 #ifdef HAVE_LIBNCURSESW
    if (CRT_utf8) {
       GraphMeterMode_dots = GraphMeterMode_dotsUtf8;
@@ -285,31 +315,30 @@ static void GraphMeterMode_draw(Meter* this, int x, int y, int w) {
    struct timeval now;
    gettimeofday(&now, NULL);
    if (!timercmp(&now, &(data->time), <)) {
-      struct timeval delay = { .tv_sec = CRT_delay/10, .tv_usec = (CRT_delay-((CRT_delay/10)*10)) * 100000 };
+      int globalDelay = this->pl->settings->delay;
+      struct timeval delay = { .tv_sec = globalDelay / 10, .tv_usec = (globalDelay - ((globalDelay / 10) * 10)) * 100000 };
       timeradd(&now, &delay, &(data->time));
 
       for (int i = 0; i < nValues - 1; i++)
-         data->values[i] = data->values[i+1];
-
-      char buffer[nValues];
-      Meter_updateValues(this, buffer, nValues - 1);
+         data->values[i] = data->values[i + 1];
 
       double value = 0.0;
       for (uint8_t i = 0; i < this->curItems; i++)
          value += this->values[i];
-      value /= this->total;
       data->values[nValues - 1] = value;
    }
 
-   int i = nValues - (w*2) + 2, k = 0;
+   int i = nValues - (w * 2) + 2, k = 0;
    if (i < 0) {
-      k = -i/2;
+      k = -i / 2;
       i = 0;
    }
-   for (; i < nValues - 1; i+=2, k++) {
+   for (; i < nValues - 1; i += 2, k++) {
       int pix = GraphMeterMode_pixPerRow * GRAPH_HEIGHT;
-      int v1 = CLAMP((int) lround(data->values[i] * pix), 1, pix);
-      int v2 = CLAMP((int) lround(data->values[i+1] * pix), 1, pix);
+      if (this->total < 1)
+         this->total = 1;
+      int v1 = CLAMP((int) lround(data->values[i] / this->total * pix), 1, pix);
+      int v2 = CLAMP((int) lround(data->values[i + 1] / this->total * pix), 1, pix);
 
       int colorIdx = GRAPH_1;
       for (int line = 0; line < GRAPH_HEIGHT; line++) {
@@ -317,7 +346,7 @@ static void GraphMeterMode_draw(Meter* this, int x, int y, int w) {
          int line2 = CLAMP(v2 - (GraphMeterMode_pixPerRow * (GRAPH_HEIGHT - 1 - line)), 0, GraphMeterMode_pixPerRow);
 
          attrset(CRT_colors[colorIdx]);
-         mvaddstr(y+line, x+k, GraphMeterMode_dots[line1 * (GraphMeterMode_pixPerRow + 1) + line2]);
+         mvaddstr(y + line, x + k, GraphMeterMode_dots[line1 * (GraphMeterMode_pixPerRow + 1) + line2]);
          colorIdx = GRAPH_2;
       }
    }
@@ -327,17 +356,17 @@ static void GraphMeterMode_draw(Meter* this, int x, int y, int w) {
 /* ---------- LEDMeterMode ---------- */
 
 static const char* const LEDMeterMode_digitsAscii[] = {
-   " __ ","    "," __ "," __ ","    "," __ "," __ "," __ "," __ "," __ ",
-   "|  |","   |"," __|"," __|","|__|","|__ ","|__ ","   |","|__|","|__|",
-   "|__|","   |","|__ "," __|","   |"," __|","|__|","   |","|__|"," __|"
+   " __ ", "    ", " __ ", " __ ", "    ", " __ ", " __ ", " __ ", " __ ", " __ ",
+   "|  |", "   |", " __|", " __|", "|__|", "|__ ", "|__ ", "   |", "|__|", "|__|",
+   "|__|", "   |", "|__ ", " __|", "   |", " __|", "|__|", "   |", "|__|", " __|"
 };
 
 #ifdef HAVE_LIBNCURSESW
 
 static const char* const LEDMeterMode_digitsUtf8[] = {
-   "┌──┐","  ┐ ","╶──┐","╶──┐","╷  ╷","┌──╴","┌──╴","╶──┐","┌──┐","┌──┐",
-   "│  │","  │ ","┌──┘"," ──┤","└──┤","└──┐","├──┐","   │","├──┤","└──┤",
-   "└──┘","  ╵ ","└──╴","╶──┘","   ╵","╶──┘","└──┘","   ╵","└──┘"," ──┘"
+   "┌──┐", "  ┐ ", "╶──┐", "╶──┐", "╷  ╷", "┌──╴", "┌──╴", "╶──┐", "┌──┐", "┌──┐",
+   "│  │", "  │ ", "┌──┘", " ──┤", "└──┤", "└──┐", "├──┐", "   │", "├──┤", "└──┤",
+   "└──┘", "  ╵ ", "└──╴", "╶──┘", "   ╵", "╶──┘", "└──┘", "   ╵", "└──┘", " ──┘"
 };
 
 #endif
@@ -349,9 +378,7 @@ static void LEDMeterMode_drawDigit(int x, int y, int n) {
       mvaddstr(y+i, x, LEDMeterMode_digits[i * 10 + n]);
 }
 
-static void LEDMeterMode_draw(Meter* this, int x, int y, int w) {
-   (void) w;
-
+static void LEDMeterMode_draw(Meter* this, int x, int y, ATTR_UNUSED int w) {
 #ifdef HAVE_LIBNCURSESW
    if (CRT_utf8)
       LEDMeterMode_digits = LEDMeterMode_digitsUtf8;
@@ -359,33 +386,35 @@ static void LEDMeterMode_draw(Meter* this, int x, int y, int w) {
 #endif
       LEDMeterMode_digits = LEDMeterMode_digitsAscii;
 
-   char buffer[METER_BUFFER_LEN];
-   Meter_updateValues(this, buffer, METER_BUFFER_LEN - 1);
-
    RichString_begin(out);
-   Meter_displayBuffer(this, buffer, &out);
+   Meter_displayBuffer(this, &out);
 
    int yText =
 #ifdef HAVE_LIBNCURSESW
-      CRT_utf8 ? y+1 :
+      CRT_utf8 ? y + 1 :
 #endif
-      y+2;
+      y + 2;
    attrset(CRT_colors[LED_COLOR]);
    mvaddstr(yText, x, this->caption);
    int xx = x + strlen(this->caption);
    int len = RichString_sizeVal(out);
    for (int i = 0; i < len; i++) {
-      char c = RichString_getCharVal(out, i);
+      int c = RichString_getCharVal(out, i);
       if (c >= '0' && c <= '9') {
-         LEDMeterMode_drawDigit(xx, y, c-48);
+         LEDMeterMode_drawDigit(xx, y, c - '0');
          xx += 4;
       } else {
+#ifdef HAVE_LIBNCURSESW
+         const cchar_t wc = { .chars = { c, '\0' }, .attr = 0 }; /* use LED_COLOR from attrset() */
+         mvadd_wch(yText, xx, &wc);
+#else
          mvaddch(yText, xx, c);
+#endif
          xx += 1;
       }
    }
    attrset(CRT_colors[RESET_COLOR]);
-   RichString_end(out);
+   RichString_delete(&out);
 }
 
 static MeterMode BarMeterMode = {
@@ -423,15 +452,11 @@ const MeterMode* const Meter_modes[] = {
 
 /* Blank meter */
 
-static void BlankMeter_updateValues(Meter* this, char* buffer, int size) {
-   (void) this; (void) buffer; (void) size;
-   if (size > 0) {
-      *buffer = 0;
-   }
+static void BlankMeter_updateValues(Meter* this) {
+   this->txtBuffer[0] = '\0';
 }
 
-static void BlankMeter_display(ATTR_UNUSED const Object* cast, RichString* out) {
-   RichString_prune(out);
+static void BlankMeter_display(ATTR_UNUSED const Object* cast, ATTR_UNUSED RichString* out) {
 }
 
 static const int BlankMeter_attributes[] = {

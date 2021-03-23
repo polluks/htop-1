@@ -17,7 +17,7 @@ in the source distribution for its full text.
 #endif
 
 typedef struct Vector_ {
-   Object **array;
+   Object** array;
    const ObjectClass* type;
    int arraySize;
    int growthRate;
@@ -52,13 +52,13 @@ void Vector_set(Vector* this, int idx, void* data_);
 
 #ifndef NDEBUG
 
-Object* Vector_get(Vector* this, int idx);
+Object* Vector_get(const Vector* this, int idx);
 int Vector_size(const Vector* this);
-int Vector_count(const Vector* this);
+unsigned int Vector_count(const Vector* this);
 
 #else /* NDEBUG */
 
-static inline Object* Vector_get(Vector* this, int idx) {
+static inline Object* Vector_get(const Vector* this, int idx) {
    return this->array[idx];
 }
 
@@ -67,6 +67,10 @@ static inline int Vector_size(const Vector* this) {
 }
 
 #endif /* NDEBUG */
+
+static inline const ObjectClass* Vector_type(const Vector* this) {
+    return this->type;
+}
 
 void Vector_add(Vector* this, void* data_);
 

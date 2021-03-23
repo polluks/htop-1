@@ -20,39 +20,45 @@ in the source distribution for its full text.
 
 
 static const int PressureStallMeter_attributes[] = {
-   PRESSURE_STALL_TEN, PRESSURE_STALL_SIXTY, PRESSURE_STALL_THREEHUNDRED
+   PRESSURE_STALL_TEN,
+   PRESSURE_STALL_SIXTY,
+   PRESSURE_STALL_THREEHUNDRED
 };
 
-static void PressureStallMeter_updateValues(Meter* this, char* buffer, int len) {
-    const char *file;
-    if (strstr(Meter_name(this), "CPU")) {
-       file = "cpu";
-    } else if (strstr(Meter_name(this), "IO")) {
-       file = "io";
-    } else {
-       file = "memory";
-    }
+static void PressureStallMeter_updateValues(Meter* this) {
+   const char* file;
+   if (strstr(Meter_name(this), "CPU")) {
+      file = "cpu";
+   } else if (strstr(Meter_name(this), "IO")) {
+      file = "io";
+   } else {
+      file = "memory";
+   }
 
-    bool some;
-    if (strstr(Meter_name(this), "Some")) {
-       some = true;
-    } else {
-       some = false;
-    }
+   bool some;
+   if (strstr(Meter_name(this), "Some")) {
+      some = true;
+   } else {
+      some = false;
+   }
 
-    Platform_getPressureStall(file, some, &this->values[0], &this->values[1], &this->values[2]);
-    xSnprintf(buffer, len, "xxxx %.2lf%% %.2lf%% %.2lf%%", this->values[0], this->values[1], this->values[2]);
+   Platform_getPressureStall(file, some, &this->values[0], &this->values[1], &this->values[2]);
+
+   /* only print bar for ten (not sixty and threehundred), cause the sum is meaningless */
+   this->curItems = 1;
+
+   xSnprintf(this->txtBuffer, sizeof(this->txtBuffer), "%s %s %5.2lf%% %5.2lf%% %5.2lf%%", some ? "some" : "full", file, this->values[0], this->values[1], this->values[2]);
 }
 
 static void PressureStallMeter_display(const Object* cast, RichString* out) {
    const Meter* this = (const Meter*)cast;
    char buffer[20];
-   xSnprintf(buffer, sizeof(buffer), "%.2lf%% ", this->values[0]);
-   RichString_write(out, CRT_colors[PRESSURE_STALL_TEN], buffer);
-   xSnprintf(buffer, sizeof(buffer), "%.2lf%% ", this->values[1]);
-   RichString_append(out, CRT_colors[PRESSURE_STALL_SIXTY], buffer);
-   xSnprintf(buffer, sizeof(buffer), "%.2lf%% ", this->values[2]);
-   RichString_append(out, CRT_colors[PRESSURE_STALL_THREEHUNDRED], buffer);
+   xSnprintf(buffer, sizeof(buffer), "%5.2lf%% ", this->values[0]);
+   RichString_writeAscii(out, CRT_colors[PRESSURE_STALL_TEN], buffer);
+   xSnprintf(buffer, sizeof(buffer), "%5.2lf%% ", this->values[1]);
+   RichString_appendAscii(out, CRT_colors[PRESSURE_STALL_SIXTY], buffer);
+   xSnprintf(buffer, sizeof(buffer), "%5.2lf%% ", this->values[2]);
+   RichString_appendAscii(out, CRT_colors[PRESSURE_STALL_THREEHUNDRED], buffer);
 }
 
 const MeterClass PressureStallCPUSomeMeter_class = {
@@ -67,8 +73,9 @@ const MeterClass PressureStallCPUSomeMeter_class = {
    .total = 100.0,
    .attributes = PressureStallMeter_attributes,
    .name = "PressureStallCPUSome",
-   .uiName = "Pressure Stall Information, some CPU",
-   .caption = "Some CPU pressure: "
+   .uiName = "PSI some CPU",
+   .caption = "PSI some CPU:    ",
+   .description = "Pressure Stall Information, some cpu"
 };
 
 const MeterClass PressureStallIOSomeMeter_class = {
@@ -83,8 +90,9 @@ const MeterClass PressureStallIOSomeMeter_class = {
    .total = 100.0,
    .attributes = PressureStallMeter_attributes,
    .name = "PressureStallIOSome",
-   .uiName = "Pressure Stall Information, some IO",
-   .caption = "Some IO  pressure: "
+   .uiName = "PSI some IO",
+   .caption = "PSI some IO:     ",
+   .description = "Pressure Stall Information, some io"
 };
 
 const MeterClass PressureStallIOFullMeter_class = {
@@ -99,8 +107,9 @@ const MeterClass PressureStallIOFullMeter_class = {
    .total = 100.0,
    .attributes = PressureStallMeter_attributes,
    .name = "PressureStallIOFull",
-   .uiName = "Pressure Stall Information, full IO",
-   .caption = "Full IO  pressure: "
+   .uiName = "PSI full IO",
+   .caption = "PSI full IO:     ",
+   .description = "Pressure Stall Information, full io"
 };
 
 const MeterClass PressureStallMemorySomeMeter_class = {
@@ -115,8 +124,9 @@ const MeterClass PressureStallMemorySomeMeter_class = {
    .total = 100.0,
    .attributes = PressureStallMeter_attributes,
    .name = "PressureStallMemorySome",
-   .uiName = "Pressure Stall Information, some memory",
-   .caption = "Some Mem pressure: "
+   .uiName = "PSI some memory",
+   .caption = "PSI some memory: ",
+   .description = "Pressure Stall Information, some memory"
 };
 
 const MeterClass PressureStallMemoryFullMeter_class = {
@@ -131,6 +141,7 @@ const MeterClass PressureStallMemoryFullMeter_class = {
    .total = 100.0,
    .attributes = PressureStallMeter_attributes,
    .name = "PressureStallMemoryFull",
-   .uiName = "Pressure Stall Information, full memory",
-   .caption = "Full Mem pressure: "
+   .uiName = "PSI full memory",
+   .caption = "PSI full memory: ",
+   .description = "Pressure Stall Information, full memory"
 };
