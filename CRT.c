@@ -80,6 +80,7 @@ bool CRT_utf8 = false;
 
 const char* const* CRT_treeStr = CRT_treeStrAscii;
 
+static const Settings* CRT_crashSettings;
 static const int* CRT_delay;
 
 const char* CRT_degreeSign;
@@ -118,6 +119,7 @@ static int CRT_colorSchemes[LAST_COLORSCHEME][LAST_COLORELEMENT] = {
       [UPTIME] = A_BOLD | ColorPair(Cyan, Black),
       [BATTERY] = A_BOLD | ColorPair(Cyan, Black),
       [LARGE_NUMBER] = A_BOLD | ColorPair(Red, Black),
+      [METER_SHADOW] = A_BOLD | ColorPairGrayBlack,
       [METER_TEXT] = ColorPair(Cyan, Black),
       [METER_VALUE] = A_BOLD | ColorPair(Cyan, Black),
       [METER_VALUE_ERROR] = A_BOLD | ColorPair(Red, Black),
@@ -165,6 +167,7 @@ static int CRT_colorSchemes[LAST_COLORSCHEME][LAST_COLORELEMENT] = {
       [LOAD_AVERAGE_ONE] = A_BOLD | ColorPair(White, Black),
       [LOAD] = A_BOLD,
       [HELP_BOLD] = A_BOLD | ColorPair(Cyan, Black),
+      [HELP_SHADOW] = A_BOLD | ColorPairGrayBlack,
       [CLOCK] = A_BOLD,
       [DATE] = A_BOLD,
       [DATETIME] = A_BOLD,
@@ -209,6 +212,7 @@ static int CRT_colorSchemes[LAST_COLORSCHEME][LAST_COLORELEMENT] = {
       [UPTIME] = A_BOLD,
       [BATTERY] = A_BOLD,
       [LARGE_NUMBER] = A_BOLD,
+      [METER_SHADOW] = A_DIM,
       [METER_TEXT] = A_NORMAL,
       [METER_VALUE] = A_BOLD,
       [METER_VALUE_ERROR] = A_BOLD,
@@ -256,6 +260,7 @@ static int CRT_colorSchemes[LAST_COLORSCHEME][LAST_COLORELEMENT] = {
       [LOAD_AVERAGE_ONE] = A_BOLD,
       [LOAD] = A_BOLD,
       [HELP_BOLD] = A_BOLD,
+      [HELP_SHADOW] = A_DIM,
       [CLOCK] = A_BOLD,
       [DATE] = A_BOLD,
       [DATETIME] = A_BOLD,
@@ -300,6 +305,7 @@ static int CRT_colorSchemes[LAST_COLORSCHEME][LAST_COLORELEMENT] = {
       [UPTIME] = ColorPair(Yellow, White),
       [BATTERY] = ColorPair(Yellow, White),
       [LARGE_NUMBER] = ColorPair(Red, White),
+      [METER_SHADOW] = ColorPair(Blue, White),
       [METER_TEXT] = ColorPair(Blue, White),
       [METER_VALUE] = ColorPair(Black, White),
       [METER_VALUE_ERROR] = A_BOLD | ColorPair(Red, White),
@@ -347,6 +353,7 @@ static int CRT_colorSchemes[LAST_COLORSCHEME][LAST_COLORELEMENT] = {
       [LOAD_AVERAGE_ONE] = ColorPair(Black, White),
       [LOAD] = ColorPair(Black, White),
       [HELP_BOLD] = ColorPair(Blue, White),
+      [HELP_SHADOW] = A_BOLD | ColorPair(Black, White),
       [CLOCK] = ColorPair(Black, White),
       [DATE] = ColorPair(Black, White),
       [DATETIME] = ColorPair(Black, White),
@@ -391,6 +398,7 @@ static int CRT_colorSchemes[LAST_COLORSCHEME][LAST_COLORELEMENT] = {
       [UPTIME] = ColorPair(Yellow, Black),
       [BATTERY] = ColorPair(Yellow, Black),
       [LARGE_NUMBER] = ColorPair(Red, Black),
+      [METER_SHADOW] = A_BOLD | ColorPairGrayBlack,
       [METER_TEXT] = ColorPair(Blue, Black),
       [METER_VALUE] = ColorPair(Black, Black),
       [METER_VALUE_ERROR] = A_BOLD | ColorPair(Red, Black),
@@ -438,6 +446,7 @@ static int CRT_colorSchemes[LAST_COLORSCHEME][LAST_COLORELEMENT] = {
       [LOAD_AVERAGE_ONE] = ColorPair(Black, Black),
       [LOAD] = ColorPairWhiteDefault,
       [HELP_BOLD] = ColorPair(Blue, Black),
+      [HELP_SHADOW] = A_BOLD | ColorPairGrayBlack,
       [CLOCK] = ColorPairWhiteDefault,
       [DATE] = ColorPairWhiteDefault,
       [DATETIME] = ColorPairWhiteDefault,
@@ -482,6 +491,7 @@ static int CRT_colorSchemes[LAST_COLORSCHEME][LAST_COLORELEMENT] = {
       [UPTIME] = A_BOLD | ColorPair(Yellow, Blue),
       [BATTERY] = A_BOLD | ColorPair(Yellow, Blue),
       [LARGE_NUMBER] = A_BOLD | ColorPair(Red, Blue),
+      [METER_SHADOW] = ColorPair(Cyan, Blue),
       [METER_TEXT] = ColorPair(Cyan, Blue),
       [METER_VALUE] = A_BOLD | ColorPair(Cyan, Blue),
       [METER_VALUE_ERROR] = A_BOLD | ColorPair(Red, Blue),
@@ -529,6 +539,7 @@ static int CRT_colorSchemes[LAST_COLORSCHEME][LAST_COLORELEMENT] = {
       [LOAD_AVERAGE_ONE] = A_BOLD | ColorPair(White, Blue),
       [LOAD] = A_BOLD | ColorPair(White, Blue),
       [HELP_BOLD] = A_BOLD | ColorPair(Cyan, Blue),
+      [HELP_SHADOW] = A_BOLD | ColorPair(Black, Blue),
       [CLOCK] = ColorPair(White, Blue),
       [DATE] = ColorPair(White, Blue),
       [DATETIME] = ColorPair(White, Blue),
@@ -573,6 +584,7 @@ static int CRT_colorSchemes[LAST_COLORSCHEME][LAST_COLORELEMENT] = {
       [UPTIME] = ColorPair(Green, Black),
       [BATTERY] = ColorPair(Green, Black),
       [LARGE_NUMBER] = A_BOLD | ColorPair(Red, Black),
+      [METER_SHADOW] = A_BOLD | ColorPairGrayBlack,
       [METER_TEXT] = ColorPair(Cyan, Black),
       [METER_VALUE] = ColorPair(Green, Black),
       [METER_VALUE_ERROR] = A_BOLD | ColorPair(Red, Black),
@@ -620,6 +632,7 @@ static int CRT_colorSchemes[LAST_COLORSCHEME][LAST_COLORELEMENT] = {
       [LOAD_AVERAGE_ONE] = A_BOLD | ColorPair(Green, Black),
       [LOAD] = A_BOLD,
       [HELP_BOLD] = A_BOLD | ColorPair(Cyan, Black),
+      [HELP_SHADOW] = A_BOLD | ColorPairGrayBlack,
       [CLOCK] = ColorPair(Green, Black),
       [CHECK_BOX] = ColorPair(Green, Black),
       [CHECK_MARK] = A_BOLD | ColorPair(Green, Black),
@@ -755,6 +768,7 @@ void CRT_init(const Settings* settings, bool allowUnicode) {
 
    initscr();
    noecho();
+   CRT_crashSettings = settings;
    CRT_delay = &(settings->delay);
    CRT_colors = CRT_colorSchemes[settings->colorScheme];
    CRT_colorScheme = settings->colorScheme;
@@ -915,7 +929,7 @@ void CRT_handleSIGSEGV(int signal) {
       "Please check at https://htop.dev/issues whether this issue has already been reported.\n"
       "If no similar issue has been reported before, please create a new issue with the following information:\n"
       "\n"
-      "- Your htop version (htop --version)\n"
+      "- Your "PACKAGE" version ("PACKAGE" --version)\n"
       "- Your OS and kernel version (uname -a)\n"
       "- Your distribution and release (lsb_release -a)\n"
       "- Likely steps to reproduce (How did it happened?)\n"
@@ -941,6 +955,12 @@ void CRT_handleSIGSEGV(int signal) {
       signal, signal_str
    );
 
+   fprintf(stderr,
+      "Setting information:\n"
+      "--------------------\n");
+   Settings_write(CRT_crashSettings, true);
+   fprintf(stderr, "\n");
+
 #ifdef HAVE_EXECINFO_H
    fprintf(stderr,
       "Backtrace information:\n"
@@ -952,20 +972,20 @@ void CRT_handleSIGSEGV(int signal) {
    void *backtraceArray[256];
 
    size_t size = backtrace(backtraceArray, ARRAYSIZE(backtraceArray));
-   backtrace_symbols_fd(backtraceArray, size, 2);
+   backtrace_symbols_fd(backtraceArray, size, STDERR_FILENO);
    fprintf(stderr,
       "---\n"
       "\n"
       "To make the above information more practical to work with,\n"
-      "you should provide a disassembly of your binary.\n"
+      "please also provide a disassembly of your "PACKAGE" binary.\n"
       "This can usually be done by running the following command:\n"
       "\n"
    );
 
 #ifdef HTOP_DARWIN
-   fprintf(stderr, "   otool -tvV `which htop` > ~/htop.otool\n");
+   fprintf(stderr, "   otool -tvV `which "PACKAGE"` > ~/htop.otool\n");
 #else
-   fprintf(stderr, "   objdump -d -S -w `which htop` > ~/htop.objdump\n");
+   fprintf(stderr, "   objdump -d -S -w `which "PACKAGE"` > ~/htop.objdump\n");
 #endif
 
    fprintf(stderr,
@@ -978,9 +998,9 @@ void CRT_handleSIGSEGV(int signal) {
    fprintf(stderr,
       "Running this program with debug symbols or inside a debugger may provide further insights.\n"
       "\n"
-      "Thank you for helping to improve htop!\n"
+      "Thank you for helping to improve "PACKAGE"!\n"
       "\n"
-      "htop " VERSION " aborting.\n"
+      PACKAGE " " VERSION " aborting.\n"
       "\n"
    );
 

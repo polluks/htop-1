@@ -153,7 +153,7 @@ ListItem* Meter_toListItem(const Meter* this, bool moving) {
 
 /* ---------- TextMeterMode ---------- */
 
-static void TextMeterMode_draw(Meter* this, int x, int y, ATTR_UNUSED int w) {
+static void TextMeterMode_draw(Meter* this, int x, int y, int w) {
    attrset(CRT_colors[METER_TEXT]);
    mvaddnstr(y, x, this->caption, w - 1);
    attrset(CRT_colors[RESET_COLOR]);
@@ -286,6 +286,7 @@ static const char* const GraphMeterMode_dotsAscii[] = {
 };
 
 static void GraphMeterMode_draw(Meter* this, int x, int y, int w) {
+   const ProcessList* pl = this->pl;
 
    if (!this->drawData) {
       this->drawData = xCalloc(1, sizeof(GraphData));
@@ -312,12 +313,10 @@ static void GraphMeterMode_draw(Meter* this, int x, int y, int w) {
    x += captionLen;
    w -= captionLen;
 
-   struct timeval now;
-   gettimeofday(&now, NULL);
-   if (!timercmp(&now, &(data->time), <)) {
+   if (!timercmp(&pl->realtime, &(data->time), <)) {
       int globalDelay = this->pl->settings->delay;
       struct timeval delay = { .tv_sec = globalDelay / 10, .tv_usec = (globalDelay - ((globalDelay / 10) * 10)) * 100000 };
-      timeradd(&now, &delay, &(data->time));
+      timeradd(&pl->realtime, &delay, &(data->time));
 
       for (int i = 0; i < nValues - 1; i++)
          data->values[i] = data->values[i + 1];

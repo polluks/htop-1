@@ -8,12 +8,16 @@ in the source distribution for its full text.
 
 #include "generic/uname.h"
 
+#include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
+
+#include "Macros.h"
+#include "XUtils.h"
+
 #ifdef HAVE_SYS_UTSNAME_H
 #include <sys/utsname.h>
 #endif
-
-#include "XUtils.h"
 
 
 #ifndef OSRELEASEFILE

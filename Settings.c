@@ -175,6 +175,8 @@ static bool Settings_read(Settings* this, const char* fileName, unsigned int ini
          this->showProgramPath = atoi(option[1]);
       } else if (String_eq(option[0], "highlight_base_name")) {
          this->highlightBaseName = atoi(option[1]);
+      } else if (String_eq(option[0], "highlight_deleted_exe")) {
+         this->highlightDeletedExe = atoi(option[1]);
       } else if (String_eq(option[0], "highlight_megabytes")) {
          this->highlightMegabytes = atoi(option[1]);
       } else if (String_eq(option[0], "highlight_threads")) {
@@ -281,13 +283,20 @@ static void writeMeterModes(const Settings* this, FILE* fd, int column) {
    fprintf(fd, "\n");
 }
 
-int Settings_write(const Settings* this) {
-   FILE* fd = fopen(this->filename, "w");
-   if (fd == NULL)
-      return -errno;
+int Settings_write(const Settings* this, bool onCrash) {
+   FILE* fd;
+   if (onCrash) {
+      fd = stderr;
+   } else {
+      fd = fopen(this->filename, "w");
+      if (fd == NULL)
+         return -errno;
+   }
 
-   fprintf(fd, "# Beware! This file is rewritten by htop when settings are changed in the interface.\n");
-   fprintf(fd, "# The parser is also very primitive, and not human-friendly.\n");
+   if (!onCrash) {
+      fprintf(fd, "# Beware! This file is rewritten by htop when settings are changed in the interface.\n");
+      fprintf(fd, "# The parser is also very primitive, and not human-friendly.\n");
+   }
    writeFields(fd, this->fields, "fields");
    // This "-1" is for compatibility with the older enum format.
    fprintf(fd, "sort_key=%d\n", (int) this->sortKey - 1);
@@ -300,6 +309,7 @@ int Settings_write(const Settings* this) {
    fprintf(fd, "show_thread_names=%d\n", (int) this->showThreadNames);
    fprintf(fd, "show_program_path=%d\n", (int) this->showProgramPath);
    fprintf(fd, "highlight_base_name=%d\n", (int) this->highlightBaseName);
+   fprintf(fd, "highlight_deleted_exe=%d\n", (int) this->highlightDeletedExe);
    fprintf(fd, "highlight_megabytes=%d\n", (int) this->highlightMegabytes);
    fprintf(fd, "highlight_threads=%d\n", (int) this->highlightThreads);
    fprintf(fd, "highlight_changes=%d\n", (int) this->highlightChanges);
@@ -333,6 +343,9 @@ int Settings_write(const Settings* this) {
    fprintf(fd, "topology_affinity=%d\n", (int) this->topologyAffinity);
    #endif
 
+   if (onCrash)
+      return 0;
+
    int r = 0;
 
    if (ferror(fd) != 0)
@@ -358,6 +371,7 @@ Settings* Settings_new(unsigned int initialCpuCount) {
    this->treeView = false;
    this->allBranchesCollapsed = false;
    this->highlightBaseName = false;
+   this->highlightDeletedExe = true;
    this->highlightMegabytes = false;
    this->detailedCPUTime = false;
    this->countCPUsFromOne = false;
@@ -431,7 +445,7 @@ Settings* Settings_new(unsigned int initialCpuCount) {
       ok = Settings_read(this, legacyDotfile, initialCpuCount);
       if (ok) {
          // Transition to new location and delete old configuration file
-         if (Settings_write(this) == 0) {
+         if (Settings_write(this, false) == 0) {
             unlink(legacyDotfile);
          }
       }
@@ -471,4 +485,14 @@ void Settings_setSortKey(Settings* this, ProcessField sortKey) {
       this->treeSortKey = sortKey;
       this->treeDirection = (Process_fields[sortKey].defaultSortDesc) ? -1 : 1;
    }
+}
+
+static bool readonly = false;
+
+void Settings_enableReadonly(void) {
+   readonly = true;
+}
+
+bool Settings_isReadonly(void) {
+   return readonly;
 }

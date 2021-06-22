@@ -54,6 +54,7 @@ typedef struct Settings_ {
    bool hideKernelThreads;
    bool hideUserlandThreads;
    bool highlightBaseName;
+   bool highlightDeletedExe;
    bool highlightMegabytes;
    bool highlightThreads;
    bool highlightChanges;
@@ -87,12 +88,16 @@ static inline int Settings_getActiveDirection(const Settings* this) {
 
 void Settings_delete(Settings* this);
 
-int Settings_write(const Settings* this);
+int Settings_write(const Settings* this, bool onCrash);
 
 Settings* Settings_new(unsigned int initialCpuCount);
 
 void Settings_invertSortOrder(Settings* this);
 
 void Settings_setSortKey(Settings* this, ProcessField sortKey);
+
+void Settings_enableReadonly(void);
+
+bool Settings_isReadonly(void);
 
 #endif

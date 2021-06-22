@@ -5,13 +5,16 @@ Released under the GNU GPLv2, see the COPYING file
 in the source distribution for its full text.
 */
 
-#include "ZfsArcMeter.h"
-#include "ZfsArcStats.h"
+#include "zfs/ZfsArcMeter.h"
+
+#include <stddef.h>
 
 #include "CRT.h"
 #include "Object.h"
 #include "Platform.h"
 #include "RichString.h"
+
+#include "zfs/ZfsArcStats.h"
 
 
 static const int ZfsArcMeter_attributes[] = {

@@ -11,10 +11,10 @@ in the source distribution for its full text.
 #include <stdlib.h>
 #include <string.h>
 
-#include "Compat.h"
 #include "CRT.h"
 #include "Hashtable.h"
 #include "Macros.h"
+#include "Platform.h"
 #include "Vector.h"
 #include "XUtils.h"
 
@@ -34,8 +34,10 @@ ProcessList* ProcessList_init(ProcessList* this, const ObjectClass* klass, Users
 
    // set later by platform-specific code
    this->cpuCount = 0;
+   this->monotonicMs = 0;
 
-   this->scanTs = 0;
+   // always maintain valid realtime timestamps
+   Platform_gettime_realtime(&this->realtime, &this->realtimeMs);
 
 #ifdef HAVE_LIBHWLOC
    this->topologyOk = false;
@@ -131,7 +133,7 @@ void ProcessList_add(ProcessList* this, Process* p) {
    p->processList = this;
 
    // highlighting processes found in first scan by first scan marked "far in the past"
-   p->seenTs = this->scanTs;
+   p->seenStampMs = this->monotonicMs;
 
    Vector_add(this->processes, p);
    Hashtable_put(this->processTable, p->pid, p);
@@ -163,14 +165,6 @@ void ProcessList_remove(ProcessList* this, const Process* p) {
 
    assert(Hashtable_get(this->processTable, pid) == NULL);
    assert(Hashtable_count(this->processTable) == Vector_count(this->processes));
-}
-
-Process* ProcessList_get(ProcessList* this, int idx) {
-   return (Process*)Vector_get(this->processes, idx);
-}
-
-int ProcessList_size(const ProcessList* this) {
-   return Vector_size(this->processes);
 }
 
 // ProcessList_updateTreeSetLayer sorts this->displayTreeSet,
@@ -527,12 +521,12 @@ void ProcessList_rebuildPanel(ProcessList* this) {
       }
    }
 
-   const int processCount = ProcessList_size(this);
+   const int processCount = Vector_size(this->processes);
    int idx = 0;
    bool foundFollowed = false;
 
    for (int i = 0; i < processCount; i++) {
-      Process* p = ProcessList_get(this, i);
+      Process* p = (Process*) Vector_get(this->processes, i);
 
       if ( (!p->show)
          || (this->userId != (uid_t) -1 && (p->st_uid != this->userId))
@@ -569,21 +563,19 @@ void ProcessList_rebuildPanel(ProcessList* this) {
 
 Process* ProcessList_getProcess(ProcessList* this, pid_t pid, bool* preExisting, Process_New constructor) {
    Process* proc = (Process*) Hashtable_get(this->processTable, pid);
-   *preExisting = proc;
+   *preExisting = proc != NULL;
    if (proc) {
       assert(Vector_indexOf(this->processes, proc, Process_pidCompare) != -1);
       assert(proc->pid == pid);
    } else {
       proc = constructor(this->settings);
-      assert(proc->comm == NULL);
+      assert(proc->cmdline == NULL);
       proc->pid = pid;
    }
    return proc;
 }
 
 void ProcessList_scan(ProcessList* this, bool pauseProcessUpdate) {
-   struct timespec now;
-
    // in pause mode only gather global data for meters (CPU/memory/...)
    if (pauseProcessUpdate) {
       ProcessList_goThroughEntries(this, true);
@@ -604,37 +596,35 @@ void ProcessList_scan(ProcessList* this, bool pauseProcessUpdate) {
    this->runningTasks = 0;
 
 
-   // set scanTs
+   // set scan timestamp
    static bool firstScanDone = false;
-   if (!firstScanDone) {
-      this->scanTs = 0;
+   if (firstScanDone) {
+      Platform_gettime_monotonic(&this->monotonicMs);
+   } else {
+      this->monotonicMs = 0;
       firstScanDone = true;
-   } else if (Compat_clock_monotonic_gettime(&now) == 0) {
-      // save time in millisecond, so with a delay in deciseconds
-      // there are no irregularities
-      this->scanTs = 1000 * now.tv_sec + now.tv_nsec / 1000000;
    }
 
    ProcessList_goThroughEntries(this, false);
 
    for (int i = Vector_size(this->processes) - 1; i >= 0; i--) {
       Process* p = (Process*) Vector_get(this->processes, i);
-      if (p->tombTs > 0) {
+      Process_makeCommandStr(p);
+
+      if (p->tombStampMs > 0) {
          // remove tombed process
-         if (this->scanTs >= p->tombTs) {
+         if (this->monotonicMs >= p->tombStampMs) {
             ProcessList_remove(this, p);
          }
       } else if (p->updated == false) {
          // process no longer exists
          if (this->settings->highlightChanges && p->wasShown) {
             // mark tombed
-            p->tombTs = this->scanTs + 1000 * this->settings->highlightDelaySecs;
+            p->tombStampMs = this->monotonicMs + 1000 * this->settings->highlightDelaySecs;
          } else {
             // immediately remove
             ProcessList_remove(this, p);
          }
-      } else {
-         p->updated = false;
       }
    }
 

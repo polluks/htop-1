@@ -1,4 +1,4 @@
-#include "LibSensors.h"
+#include "linux/LibSensors.h"
 
 #ifdef HAVE_SENSORS_SENSORS_H
 
@@ -163,7 +163,7 @@ void LibSensors_getCPUTemperatures(CPUData* cpus, unsigned int cpuCount) {
          if (tempID == 0 || tempID == ULONG_MAX)
             continue;
 
-         /* Feature name IDs start at 1, adjust to start at 0 to match data indicies */
+         /* Feature name IDs start at 1, adjust to start at 0 to match data indices */
          tempID--;
 
          if (tempID > cpuCount)

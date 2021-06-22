@@ -10,6 +10,8 @@ in the source distribution for its full text.
 #include "config.h" // IWYU pragma: keep
 
 #include <stdbool.h>
+#include <stdint.h>
+#include <sys/time.h>
 #include <sys/types.h>
 
 #include "Hashtable.h"
@@ -48,6 +50,10 @@ typedef struct ProcessList_ {
    Hashtable* displayTreeSet;
    Hashtable* draftingTreeSet;
 
+   struct timeval realtime;   /* time of the current sample */
+   uint64_t realtimeMs;       /* current time in milliseconds */
+   uint64_t monotonicMs;      /* same, but from monotonic clock */
+
    Panel* panel;
    int following;
    uid_t userId;
@@ -76,8 +82,6 @@ typedef struct ProcessList_ {
    memory_t cachedSwap;
 
    unsigned int cpuCount;
-
-   time_t scanTs;
 } ProcessList;
 
 ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* pidMatchList, uid_t userId);
@@ -96,10 +100,6 @@ void ProcessList_printHeader(const ProcessList* this, RichString* header);
 void ProcessList_add(ProcessList* this, Process* p);
 
 void ProcessList_remove(ProcessList* this, const Process* p);
-
-Process* ProcessList_get(ProcessList* this, int idx);
-
-int ProcessList_size(const ProcessList* this);
 
 void ProcessList_sort(ProcessList* this);
 

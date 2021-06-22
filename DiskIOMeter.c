@@ -9,12 +9,12 @@ in the source distribution for its full text.
 
 #include <stdbool.h>
 #include <stdio.h>
-#include <sys/time.h>
 
 #include "CRT.h"
 #include "Macros.h"
 #include "Object.h"
 #include "Platform.h"
+#include "ProcessList.h"
 #include "RichString.h"
 #include "XUtils.h"
 
@@ -31,12 +31,10 @@ static uint32_t cached_write_diff;
 static double cached_utilisation_diff;
 
 static void DiskIOMeter_updateValues(Meter* this) {
-   static uint64_t cached_last_update;
+   const ProcessList* pl = this->pl;
 
-   struct timeval tv;
-   gettimeofday(&tv, NULL);
-   uint64_t timeInMilliSeconds = (uint64_t)tv.tv_sec * 1000 + (uint64_t)tv.tv_usec / 1000;
-   uint64_t passedTimeInMs = timeInMilliSeconds - cached_last_update;
+   static uint64_t cached_last_update;
+   uint64_t passedTimeInMs = pl->realtimeMs - cached_last_update;
 
    /* update only every 500ms */
    if (passedTimeInMs > 500) {
@@ -45,7 +43,7 @@ static void DiskIOMeter_updateValues(Meter* this) {
       static uint64_t cached_msTimeSpend_total;
       uint64_t diff;
 
-      cached_last_update = timeInMilliSeconds;
+      cached_last_update = pl->realtimeMs;
 
       DiskIOData data;
 
@@ -99,10 +97,11 @@ static void DiskIOMeter_display(ATTR_UNUSED const Object* cast, RichString* out)
    }
 
    char buffer[16];
+   int len;
 
    int color = cached_utilisation_diff > 40.0 ? METER_VALUE_NOTICE : METER_VALUE;
-   xSnprintf(buffer, sizeof(buffer), "%.1f%%", cached_utilisation_diff);
-   RichString_writeAscii(out, CRT_colors[color], buffer);
+   len = xSnprintf(buffer, sizeof(buffer), "%.1f%%", cached_utilisation_diff);
+   RichString_appendnAscii(out, CRT_colors[color], buffer, len);
 
    RichString_appendAscii(out, CRT_colors[METER_TEXT], " read: ");
    Meter_humanUnit(buffer, cached_read_diff, sizeof(buffer));

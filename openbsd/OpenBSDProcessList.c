@@ -6,7 +6,7 @@ Released under the GNU GPLv2, see the COPYING file
 in the source distribution for its full text.
 */
 
-#include "OpenBSDProcessList.h"
+#include "openbsd/OpenBSDProcessList.h"
 
 #include <kvm.h>
 #include <limits.h>
@@ -25,11 +25,11 @@ in the source distribution for its full text.
 #include "CRT.h"
 #include "Macros.h"
 #include "Object.h"
-#include "OpenBSDProcess.h"
 #include "Process.h"
 #include "ProcessList.h"
 #include "Settings.h"
 #include "XUtils.h"
+#include "openbsd/OpenBSDProcess.h"
 
 
 static long fscale;
@@ -37,9 +37,12 @@ static int pageSize;
 static int pageSizeKB;
 
 ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* pidMatchList, uid_t userId) {
-   const int mib[] = { CTL_HW, HW_NCPU };
+   const int nmib[] = { CTL_HW, HW_NCPU };
+   const int mib[] = { CTL_HW, HW_NCPUONLINE };
    const int fmib[] = { CTL_KERN, KERN_FSCALE };
    int r;
+   unsigned int cpu_index_c = 0;
+   unsigned int ncpu;
    size_t size;
    char errbuf[_POSIX2_LINE_MAX];
 
@@ -53,6 +56,12 @@ ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* pidMatchList, ui
       pl->cpuCount = 1;
    }
    opl->cpus = xCalloc(pl->cpuCount + 1, sizeof(CPUData));
+
+   size = sizeof(int);
+   r = sysctl(nmib, 2, &ncpu, &size, NULL, 0);
+   if (r < 0) {
+      ncpu = pl->cpuCount;
+   }
 
    size = sizeof(fscale);
    if (sysctl(fmib, 2, &fscale, &size, NULL, 0) < 0) {
@@ -75,6 +84,23 @@ ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* pidMatchList, ui
    }
 
    opl->cpuSpeed = -1;
+
+   for (unsigned int i = 0; i < ncpu; i++) {
+      const int ncmib[] = { CTL_KERN, KERN_CPUSTATS, i };
+      struct cpustats cpu_stats;
+
+      size = sizeof(cpu_stats);
+      if (sysctl(ncmib, 3, &cpu_stats, &size, NULL, 0) < 0) {
+         CRT_fatalError("ncmib sysctl call failed");
+      }
+      if (cpu_stats.cs_flags & CPUSTATS_ONLINE) {
+         opl->cpus[cpu_index_c].cpuIndex = i;
+         cpu_index_c++;
+      }
+
+      if (cpu_index_c == pl->cpuCount)
+         break;
+   }
 
    return pl;
 }
@@ -145,15 +171,37 @@ static void OpenBSDProcessList_scanMemoryInfo(ProcessList* pl) {
    }
 }
 
-static char* OpenBSDProcessList_readProcessName(kvm_t* kd, const struct kinfo_proc* kproc, int* basenameEnd) {
+static void OpenBSDProcessList_updateCwd(const struct kinfo_proc* kproc, Process* proc) {
+   const int mib[] = { CTL_KERN, KERN_PROC_CWD, kproc->ki_pid };
+   char buffer[2048];
+   size_t size = sizeof(buffer);
+   if (sysctl(mib, 3, buffer, &size, NULL, 0) != 0) {
+      free(proc->procCwd);
+      proc->procCwd = NULL;
+      return;
+   }
+
+   /* Kernel threads return an empty buffer */
+   if (buffer[0] == '\0') {
+      free(proc->procCwd);
+      proc->procCwd = NULL;
+      return;
+   }
+
+   free_and_xStrdup(&proc->procCwd, buffer);
+}
+
+static void OpenBSDProcessList_updateProcessName(kvm_t* kd, const struct kinfo_proc* kproc, Process* proc) {
+   Process_updateComm(proc, kproc->p_comm);
+
    /*
     * Like OpenBSD's top(1), we try to fall back to the command name
     * (argv[0]) if we fail to construct the full command.
     */
    char** arg = kvm_getargv(kd, kproc, 500);
    if (arg == NULL || *arg == NULL) {
-      *basenameEnd = strlen(kproc->p_comm);
-      return xStrdup(kproc->p_comm);
+      Process_updateCmdline(proc, kproc->p_comm, 0, strlen(kproc->p_comm));
+      return;
    }
 
    size_t len = 0;
@@ -164,22 +212,30 @@ static char* OpenBSDProcessList_readProcessName(kvm_t* kd, const struct kinfo_pr
    /* don't use xMalloc here - we want to handle huge argv's gracefully */
    char* s;
    if ((s = malloc(len)) == NULL) {
-      *basenameEnd = strlen(kproc->p_comm);
-      return xStrdup(kproc->p_comm);
+      Process_updateCmdline(proc, kproc->p_comm, 0, strlen(kproc->p_comm));
+      return;
    }
 
    *s = '\0';
 
+   int start = 0;
+   int end = 0;
    for (int i = 0; arg[i] != NULL; i++) {
       size_t n = strlcat(s, arg[i], len);
       if (i == 0) {
-         *basenameEnd = MINIMUM(n, len - 1);
+         end = MINIMUM(n, len - 1);
+         /* check if cmdline ended earlier, e.g 'kdeinit5: Running...' */
+         for (int j = end; j > 0; j--) {
+            if (arg[0][j] == ' ' && arg[0][j-1] != '\\') {
+               end = (arg[0][j-1] == ':') ? (j-1) : j;
+            }
+         }
       }
       /* the trailing space should get truncated anyway */
       strlcat(s, " ", len);
    }
 
-   return s;
+   Process_updateCmdline(proc, s, start, end);
 }
 
 /*
@@ -225,18 +281,30 @@ static void OpenBSDProcessList_scanProcs(OpenBSDProcessList* this) {
          proc->tpgid = kproc->p_tpgid;
          proc->tgid = kproc->p_pid;
          proc->session = kproc->p_sid;
-         proc->tty_nr = kproc->p_tdev;
          proc->pgrp = kproc->p__pgid;
-         proc->st_uid = kproc->p_uid;
+         proc->isKernelThread = proc->pgrp == 0;
+         proc->isUserlandThread = kproc->p_tid != -1;
          proc->starttime_ctime = kproc->p_ustart_sec;
          Process_fillStarttimeBuffer(proc);
-         proc->user = UsersTable_getRef(this->super.usersTable, proc->st_uid);
          ProcessList_add(&this->super, proc);
-         proc->comm = OpenBSDProcessList_readProcessName(this->kd, kproc, &proc->basenameOffset);
+
+         OpenBSDProcessList_updateProcessName(this->kd, kproc, proc);
+
+         if (settings->flags & PROCESS_FLAG_CWD) {
+            OpenBSDProcessList_updateCwd(kproc, proc);
+         }
+
+         proc->tty_nr = kproc->p_tdev;
+         const char* name = ((dev_t)kproc->p_tdev != NODEV) ? devname(kproc->p_tdev, S_IFCHR) : NULL;
+         if (!name || String_eq(name, "??")) {
+            free(proc->tty_name);
+            proc->tty_name = NULL;
+         } else {
+            free_and_xStrdup(&proc->tty_name, name);
+         }
       } else {
          if (settings->updateProcessNames) {
-            free(proc->comm);
-            proc->comm = OpenBSDProcessList_readProcessName(this->kd, kproc, &proc->basenameOffset);
+            OpenBSDProcessList_updateProcessName(this->kd, kproc, proc);
          }
       }
 
@@ -252,6 +320,11 @@ static void OpenBSDProcessList_scanProcs(OpenBSDProcessList* this) {
       proc->minflt = kproc->p_uru_minflt;
       proc->majflt = kproc->p_uru_majflt;
       proc->nlwp = 1;
+
+      if (proc->st_uid != kproc->p_uid) {
+         proc->st_uid = kproc->p_uid;
+         proc->user = UsersTable_getRef(this->super.usersTable, proc->st_uid);
+      }
 
       switch (kproc->p_stat) {
          case SIDL:    proc->state = 'I'; break;
@@ -332,7 +405,7 @@ static void OpenBSDProcessList_scanCPUTime(OpenBSDProcessList* this) {
    u_int64_t avg[CPUSTATES] = {0};
 
    for (unsigned int i = 0; i < this->super.cpuCount; i++) {
-      getKernelCPUTimes(i, kernelTimes);
+      getKernelCPUTimes(this->cpus[i].cpuIndex, kernelTimes);
       CPUData* cpu = this->cpus + i + 1;
       kernelCPUTimesToHtop(kernelTimes, cpu);
 

@@ -8,7 +8,7 @@ in the source distribution for its full text.
 
 #include "config.h" // IWYU pragma: keep
 
-#include "Platform.h"
+#include "darwin/Platform.h"
 
 #include <errno.h>
 #include <math.h>
@@ -22,7 +22,6 @@ in the source distribution for its full text.
 #include "ClockMeter.h"
 #include "CPUMeter.h"
 #include "CRT.h"
-#include "DarwinProcessList.h"
 #include "DateMeter.h"
 #include "DateTimeMeter.h"
 #include "HostnameMeter.h"
@@ -34,9 +33,14 @@ in the source distribution for its full text.
 #include "SysArchMeter.h"
 #include "TasksMeter.h"
 #include "UptimeMeter.h"
+#include "darwin/DarwinProcessList.h"
 #include "zfs/ZfsArcMeter.h"
 #include "zfs/ZfsCompressedArcMeter.h"
 
+#ifdef HAVE_HOST_GET_CLOCK_SERVICE
+#include <mach/clock.h>
+#include <mach/mach.h>
+#endif
 #ifdef HAVE_MACH_MACH_TIME_H
 #include <mach/mach_time.h>
 #endif
@@ -404,4 +408,24 @@ void Platform_getBattery(double* percent, ACPresence* isOnAC) {
 
    CFRelease(list);
    CFRelease(power_sources);
+}
+
+void Platform_gettime_monotonic(uint64_t* msec) {
+
+#ifdef HAVE_HOST_GET_CLOCK_SERVICE
+
+   clock_serv_t cclock;
+   mach_timespec_t mts;
+
+   host_get_clock_service(mach_host_self(), SYSTEM_CLOCK, &cclock);
+   clock_get_time(cclock, &mts);
+   mach_port_deallocate(mach_task_self(), cclock);
+
+   *msec = ((uint64_t)mts.tv_sec * 1000) + ((uint64_t)mts.tv_nsec / 1000000);
+
+#else
+
+   Generic_gettime_monotomic(msec);
+
+#endif
 }

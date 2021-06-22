@@ -6,7 +6,7 @@
 # ----------------------------------------------------------------------
 
 AC_PREREQ([2.69])
-AC_INIT([htop], [3.0.6-dev], [htop@groups.io], [], [https://htop.dev/])
+AC_INIT([htop], [3.1.0-dev], [htop@groups.io], [], [https://htop.dev/])
 
 AC_CONFIG_SRCDIR([htop.c])
 AC_CONFIG_AUX_DIR([build-aux])
@@ -90,6 +90,31 @@ case "$enable_static" in
       ;;
    *)
       AC_MSG_ERROR([bad value '$enable_static' for --enable-static option])
+      ;;
+esac
+
+# ----------------------------------------------------------------------
+
+# ----------------------------------------------------------------------
+# Checks for a PCP-based htop build.  (https://pcp.io)
+# ----------------------------------------------------------------------
+
+AC_ARG_ENABLE([pcp],
+              [AS_HELP_STRING([--enable-pcp],
+                              [build a pcp-htop binary @<:@default=no@:>@])],
+              [],
+              [enable_pcp=no])
+case "$enable_pcp" in
+   no)
+      ;;
+   yes)
+      AC_CHECK_HEADERS([pcp/pmapi.h], [my_htop_platform=pcp],
+                       [AC_MSG_ERROR([can not find PCP header file])])
+      AC_SEARCH_LIBS([pmNewContext], [pcp], [], [AC_MSG_ERROR([can not find PCP library])])
+      AC_DEFINE([HTOP_PCP], [1], [Define if building pcp-htop binary.])
+      ;;
+   *)
+      AC_MSG_ERROR([bad value '$enable_pcp' for --enable-pcp option])
       ;;
 esac
 
@@ -298,6 +323,11 @@ fi
 if test "$enable_static" = yes; then
    AC_SEARCH_LIBS([Gpm_GetEvent], [gpm])
 fi
+if test "$my_htop_platform" = "solaris"; then
+   # On OmniOS /usr/include/sys/regset.h redefines ERR to 13 - \r, breaking the Enter key.
+   # Since ncruses macros use the ERR macro, we can not use another name.
+   AC_DEFINE([ERR], [(-1)], [Predefine ncurses macro.])
+fi
 
 
 AC_ARG_ENABLE([hwloc],
@@ -445,7 +475,9 @@ case "$enable_delayacct" in
    no)
       ;;
    check)
-      if test "$enable_static" = yes; then
+      if test "$my_htop_platform" != linux; then
+         enable_delayacct=no
+      elif test "$enable_static" = yes; then
          enable_delayacct=no
       else
          m4_ifdef([PKG_PROG_PKG_CONFIG], [
@@ -601,6 +633,7 @@ AM_CONDITIONAL([HTOP_DRAGONFLYBSD], [test "$my_htop_platform" = dragonflybsd])
 AM_CONDITIONAL([HTOP_OPENBSD], [test "$my_htop_platform" = openbsd])
 AM_CONDITIONAL([HTOP_DARWIN], [test "$my_htop_platform" = darwin])
 AM_CONDITIONAL([HTOP_SOLARIS], [test "$my_htop_platform" = solaris])
+AM_CONDITIONAL([HTOP_PCP], [test "$my_htop_platform" = pcp])
 AM_CONDITIONAL([HTOP_UNSUPPORTED], [test "$my_htop_platform" = unsupported])
 
 AC_SUBST(my_htop_platform)

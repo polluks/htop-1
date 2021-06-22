@@ -13,15 +13,27 @@ in the source distribution for its full text.
 #define GZONE "global    "
 #define UZONE "unknown   "
 
-#include "zfs/ZfsArcStats.h"
+
+#include "config.h" // IWYU pragma: keep
 
 #include <kstat.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <sys/param.h>
 #include <sys/uio.h>
 #include <sys/resource.h>
 #include <sys/sysconf.h>
 #include <sys/sysinfo.h>
 #include <sys/swap.h>
+
+#include "Hashtable.h"
+#include "ProcessList.h"
+#include "UsersTable.h"
+
+#include "solaris/SolarisProcess.h"
+
+#include "zfs/ZfsArcStats.h"
+
 
 #define ZONE_ERRMSGLEN 1024
 extern char zone_errmsg[ZONE_ERRMSGLEN];
@@ -47,19 +59,9 @@ typedef struct SolarisProcessList_ {
    ZfsArcStats zfs;
 } SolarisProcessList;
 
-char* SolarisProcessList_readZoneName(kstat_ctl_t* kd, SolarisProcess* sproc);
-
 ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* pidMatchList, uid_t userId);
 
 void ProcessList_delete(ProcessList* pl);
-
-/* NOTE: the following is a callback function of type proc_walk_f
- *       and MUST conform to the appropriate definition in order
- *       to work.  See libproc(3LIB) on a Solaris or Illumos
- *       system for more info.
- */
-
-int SolarisProcessList_walkproc(psinfo_t* _psinfo, lwpsinfo_t* _lwpsinfo, void* listptr);
 
 void ProcessList_goThroughEntries(ProcessList* super, bool pauseProcessUpdate);
 

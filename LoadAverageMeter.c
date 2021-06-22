@@ -10,6 +10,7 @@ in the source distribution for its full text.
 #include "CRT.h"
 #include "Object.h"
 #include "Platform.h"
+#include "ProcessList.h"
 #include "RichString.h"
 #include "XUtils.h"
 
@@ -60,12 +61,14 @@ static void LoadAverageMeter_updateValues(Meter* this) {
 static void LoadAverageMeter_display(const Object* cast, RichString* out) {
    const Meter* this = (const Meter*)cast;
    char buffer[20];
-   xSnprintf(buffer, sizeof(buffer), "%.2f ", this->values[0]);
-   RichString_writeAscii(out, CRT_colors[LOAD_AVERAGE_ONE], buffer);
-   xSnprintf(buffer, sizeof(buffer), "%.2f ", this->values[1]);
-   RichString_appendAscii(out, CRT_colors[LOAD_AVERAGE_FIVE], buffer);
-   xSnprintf(buffer, sizeof(buffer), "%.2f ", this->values[2]);
-   RichString_appendAscii(out, CRT_colors[LOAD_AVERAGE_FIFTEEN], buffer);
+   int len;
+
+   len = xSnprintf(buffer, sizeof(buffer), "%.2f ", this->values[0]);
+   RichString_appendnAscii(out, CRT_colors[LOAD_AVERAGE_ONE], buffer, len);
+   len = xSnprintf(buffer, sizeof(buffer), "%.2f ", this->values[1]);
+   RichString_appendnAscii(out, CRT_colors[LOAD_AVERAGE_FIVE], buffer, len);
+   len = xSnprintf(buffer, sizeof(buffer), "%.2f ", this->values[2]);
+   RichString_appendnAscii(out, CRT_colors[LOAD_AVERAGE_FIFTEEN], buffer, len);
 }
 
 static void LoadMeter_updateValues(Meter* this) {
@@ -90,8 +93,10 @@ static void LoadMeter_updateValues(Meter* this) {
 static void LoadMeter_display(const Object* cast, RichString* out) {
    const Meter* this = (const Meter*)cast;
    char buffer[20];
-   xSnprintf(buffer, sizeof(buffer), "%.2f ", this->values[0]);
-   RichString_writeAscii(out, CRT_colors[LOAD], buffer);
+   int len;
+
+   len = xSnprintf(buffer, sizeof(buffer), "%.2f ", this->values[0]);
+   RichString_appendnAscii(out, CRT_colors[LOAD], buffer, len);
 }
 
 const MeterClass LoadAverageMeter_class = {

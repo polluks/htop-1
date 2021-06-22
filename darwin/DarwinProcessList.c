@@ -5,7 +5,7 @@ Released under the GNU GPLv2, see the COPYING file
 in the source distribution for its full text.
 */
 
-#include "DarwinProcessList.h"
+#include "darwin/DarwinProcessList.h"
 
 #include <errno.h>
 #include <libproc.h>
@@ -19,9 +19,9 @@ in the source distribution for its full text.
 #include <sys/sysctl.h>
 
 #include "CRT.h"
-#include "DarwinProcess.h"
-#include "Platform.h"
 #include "ProcessList.h"
+#include "darwin/DarwinProcess.h"
+#include "darwin/Platform.h"
 #include "generic/openzfs_sysctl.h"
 #include "zfs/ZfsArcStats.h"
 
@@ -213,6 +213,11 @@ void ProcessList_goThroughEntries(ProcessList* super, bool pauseProcessUpdate) {
       DarwinProcess_setFromKInfoProc(&proc->super, &ps[i], preExisting);
       DarwinProcess_setFromLibprocPidinfo(proc, dpl, time_interval);
 
+      if (proc->super.st_uid != ps[i].kp_eproc.e_ucred.cr_uid) {
+         proc->super.st_uid = ps[i].kp_eproc.e_ucred.cr_uid;
+         proc->super.user = UsersTable_getRef(super->usersTable, proc->super.st_uid);
+      }
+
       // Disabled for High Sierra due to bug in macOS High Sierra
       bool isScanThreadSupported  = ! ( CompareKernelVersion(17, 0, 0) >= 0 && CompareKernelVersion(17, 5, 0) < 0);
 
@@ -223,8 +228,6 @@ void ProcessList_goThroughEntries(ProcessList* super, bool pauseProcessUpdate) {
       super->totalTasks += 1;
 
       if (!preExisting) {
-         proc->super.user = UsersTable_getRef(super->usersTable, proc->super.st_uid);
-
          ProcessList_add(super, &proc->super);
       }
    }

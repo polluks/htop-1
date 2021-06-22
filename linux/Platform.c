@@ -7,12 +7,11 @@ in the source distribution for its full text.
 
 #include "config.h"
 
-#include "Platform.h"
+#include "linux/Platform.h"
 
 #include <assert.h>
 #include <ctype.h>
 #include <dirent.h>
-#include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
 #include <math.h>
@@ -32,10 +31,6 @@ in the source distribution for its full text.
 #include "DiskIOMeter.h"
 #include "HostnameMeter.h"
 #include "HugePageMeter.h"
-#include "IOPriority.h"
-#include "IOPriorityPanel.h"
-#include "LinuxProcess.h"
-#include "LinuxProcessList.h"
 #include "LoadAverageMeter.h"
 #include "Macros.h"
 #include "MainPanel.h"
@@ -47,22 +42,26 @@ in the source distribution for its full text.
 #include "PressureStallMeter.h"
 #include "ProcessList.h"
 #include "ProvideCurses.h"
-#include "SELinuxMeter.h"
+#include "linux/SELinuxMeter.h"
 #include "Settings.h"
 #include "SwapMeter.h"
 #include "SysArchMeter.h"
-#include "SystemdMeter.h"
 #include "TasksMeter.h"
 #include "UptimeMeter.h"
 #include "XUtils.h"
-#include "ZramMeter.h"
-#include "ZramStats.h"
-
+#include "linux/IOPriority.h"
+#include "linux/IOPriorityPanel.h"
+#include "linux/LinuxProcess.h"
+#include "linux/LinuxProcessList.h"
+#include "linux/SystemdMeter.h"
+#include "linux/ZramMeter.h"
+#include "linux/ZramStats.h"
 #include "zfs/ZfsArcMeter.h"
 #include "zfs/ZfsArcStats.h"
 #include "zfs/ZfsCompressedArcMeter.h"
 
 #ifdef HAVE_LIBCAP
+#include <errno.h>
 #include <sys/capability.h>
 #endif
 
@@ -73,7 +72,7 @@ in the source distribution for its full text.
 
 #ifdef HAVE_LIBCAP
 enum CapMode {
-   CAP_MODE_NONE,
+   CAP_MODE_OFF,
    CAP_MODE_BASIC,
    CAP_MODE_STRICT
 };
@@ -130,6 +129,9 @@ static enum CapMode Platform_capabilitiesMode = CAP_MODE_BASIC;
 #endif
 
 static Htop_Reaction Platform_actionSetIOPriority(State* st) {
+   if (Settings_isReadonly())
+      return HTOP_OK;
+
    const LinuxProcess* p = (const LinuxProcess*) Panel_getSelected((Panel*)st->mainPanel);
    if (!p)
       return HTOP_OK;
@@ -209,19 +211,25 @@ int Platform_getUptime() {
 }
 
 void Platform_getLoadAverage(double* one, double* five, double* fifteen) {
-   int activeProcs, totalProcs, lastProc;
-   *one = 0;
-   *five = 0;
-   *fifteen = 0;
-
    FILE* fd = fopen(PROCDIR "/loadavg", "r");
-   if (fd) {
-      int total = fscanf(fd, "%32lf %32lf %32lf %32d/%32d %32d", one, five, fifteen,
-         &activeProcs, &totalProcs, &lastProc);
-      (void) total;
-      assert(total == 6);
-      fclose(fd);
-   }
+   if (!fd)
+      goto err;
+
+   double scanOne, scanFive, scanFifteen;
+   int r = fscanf(fd, "%lf %lf %lf", &scanOne, &scanFive, &scanFifteen);
+   fclose(fd);
+   if (r != 3)
+      goto err;
+
+   *one = scanOne;
+   *five = scanFive;
+   *fifteen = scanFifteen;
+   return;
+
+  err:
+   *one = NAN;
+   *five = NAN;
+   *fifteen = NAN;
 }
 
 int Platform_getMaxPid() {
@@ -681,8 +689,7 @@ static ACPresence procAcpiCheck(void) {
          break;
    }
 
-   if (dir)
-      closedir(dir);
+   closedir(dir);
 
    return isOn;
 }
@@ -850,8 +857,8 @@ void Platform_longOptionsUsage(const char* name)
 {
 #ifdef HAVE_LIBCAP
    printf(
-"   --drop-capabilities[=none|basic|strict] Drop Linux capabilities when running as root\n"
-"                                none - do not drop any capabilities\n"
+"   --drop-capabilities[=off|basic|strict] Drop Linux capabilities when running as root\n"
+"                                off - do not drop any capabilities\n"
 "                                basic (default) - drop all capabilities not needed by %s\n"
 "                                strict - drop all capabilities except those needed for\n"
 "                                         core functionality\n", name);
@@ -868,7 +875,7 @@ bool Platform_getLongOption(int opt, int argc, char** argv) {
 
    switch (opt) {
 #ifdef HAVE_LIBCAP
-      case 128: {
+      case 160: {
          const char* mode = optarg;
          if (!mode && optind < argc && argv[optind] != NULL &&
             (argv[optind][0] != '\0' && argv[optind][0] != '-')) {
@@ -877,8 +884,8 @@ bool Platform_getLongOption(int opt, int argc, char** argv) {
 
          if (!mode || String_eq(mode, "basic")) {
             Platform_capabilitiesMode = CAP_MODE_BASIC;
-         } else if (String_eq(mode, "none")) {
-            Platform_capabilitiesMode = CAP_MODE_NONE;
+         } else if (String_eq(mode, "off")) {
+            Platform_capabilitiesMode = CAP_MODE_OFF;
          } else if (String_eq(mode, "strict")) {
             Platform_capabilitiesMode = CAP_MODE_STRICT;
          } else {
@@ -898,7 +905,7 @@ bool Platform_getLongOption(int opt, int argc, char** argv) {
 #ifdef HAVE_LIBCAP
 static int dropCapabilities(enum CapMode mode) {
 
-   if (mode == CAP_MODE_NONE)
+   if (mode == CAP_MODE_OFF)
       return 0;
 
    /* capabilities we keep to operate */

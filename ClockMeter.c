@@ -10,9 +10,11 @@ in the source distribution for its full text.
 #include "ClockMeter.h"
 
 #include <time.h>
+#include <sys/time.h>
 
 #include "CRT.h"
 #include "Object.h"
+#include "ProcessList.h"
 
 
 static const int ClockMeter_attributes[] = {
@@ -20,9 +22,10 @@ static const int ClockMeter_attributes[] = {
 };
 
 static void ClockMeter_updateValues(Meter* this) {
-   time_t t = time(NULL);
+   const ProcessList* pl = this->pl;
+
    struct tm result;
-   const struct tm* lt = localtime_r(&t, &result);
+   const struct tm* lt = localtime_r(&pl->realtime.tv_sec, &result);
    this->values[0] = lt->tm_hour * 60 + lt->tm_min;
    strftime(this->txtBuffer, sizeof(this->txtBuffer), "%H:%M:%S", lt);
 }

@@ -45,22 +45,33 @@ void ProcessList_goThroughEntries(ProcessList* super, bool pauseProcessUpdate) {
    proc->pid  = 1;
    proc->ppid = 1;
    proc->tgid = 0;
-   free_and_xStrdup(&proc->comm, "<unsupported architecture>");
-   proc->basenameOffset = 0;
+
+   Process_updateComm(proc, "commof16char");
+   Process_updateCmdline(proc, "<unsupported architecture>", 0, 0);
+   Process_updateExe(proc, "/path/to/executable");
+
+   if (proc->settings->flags & PROCESS_FLAG_CWD) {
+      proc->procCwd = "/current/working/directory";
+   }
+
    proc->updated = true;
 
    proc->state = 'R';
+   proc->isKernelThread = false;
+   proc->isUserlandThread = false;
    proc->show = true; /* Reflected in proc->settings-> "hideXXX" really */
    proc->pgrp = 0;
    proc->session = 0;
    proc->tty_nr = 0;
+   proc->tty_name = NULL;
    proc->tpgid = 0;
-   proc->st_uid = 0;
    proc->processor = 0;
 
    proc->percent_cpu = 2.5;
    proc->percent_mem = 2.5;
-   proc->user = "nobody";
+
+   proc->st_uid = 0;
+   proc->user = "nobody"; /* Update whenever proc->st_uid is changed */
 
    proc->priority = 0;
    proc->nice = 0;

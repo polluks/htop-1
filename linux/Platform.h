@@ -9,6 +9,9 @@ in the source distribution for its full text.
 
 #include <limits.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <sys/time.h>
 #include <sys/types.h>
 
 #include "Action.h"
@@ -19,6 +22,7 @@ in the source distribution for its full text.
 #include "Process.h"
 #include "ProcessLocksScreen.h"
 #include "SignalsPanel.h"
+#include "generic/gettime.h"
 #include "generic/hostname.h"
 #include "generic/uname.h"
 
@@ -84,7 +88,7 @@ static inline void Platform_getRelease(char** string) {
 
 #ifdef HAVE_LIBCAP
    #define PLATFORM_LONG_OPTIONS \
-      {"drop-capabilities", optional_argument, 0, 128},
+      {"drop-capabilities", optional_argument, 0, 160},
 #else
    #define PLATFORM_LONG_OPTIONS
 #endif
@@ -92,5 +96,13 @@ static inline void Platform_getRelease(char** string) {
 void Platform_longOptionsUsage(const char* name);
 
 bool Platform_getLongOption(int opt, int argc, char** argv);
+
+static inline void Platform_gettime_realtime(struct timeval* tv, uint64_t* msec) {
+    Generic_gettime_realtime(tv, msec);
+}
+
+static inline void Platform_gettime_monotonic(uint64_t* msec) {
+    Generic_gettime_monotonic(msec);
+}
 
 #endif

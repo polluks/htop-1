@@ -9,9 +9,21 @@ Released under the GNU GPLv2, see the COPYING file
 in the source distribution for its full text.
 */
 
+#include "config.h" // IWYU pragma: keep
+
+#include <kstat.h>
+
+/* On OmniOS /usr/include/sys/regset.h redefines ERR to 13 - \r, breaking the Enter key.
+ * Since ncruses macros use the ERR macro, we can not use another name.
+ */
+#undef ERR
 #include <libproc.h>
+#undef ERR
+#define ERR (-1)
+
 #include <signal.h>
 #include <stdbool.h>
+
 #include <sys/mkdev.h>
 #include <sys/proc.h>
 #include <sys/types.h>
@@ -22,6 +34,7 @@ in the source distribution for its full text.
 #include "NetworkIOMeter.h"
 #include "ProcessLocksScreen.h"
 #include "SignalsPanel.h"
+#include "generic/gettime.h"
 #include "generic/hostname.h"
 #include "generic/uname.h"
 
@@ -36,8 +49,6 @@ typedef struct envAccum_ {
    size_t bytes;
    char* env;
 } envAccum;
-
-extern double plat_loadavg[3];
 
 extern const SignalItem Platform_signals[];
 
@@ -95,6 +106,26 @@ static inline void Platform_longOptionsUsage(ATTR_UNUSED const char* name) { }
 
 static inline bool Platform_getLongOption(ATTR_UNUSED int opt, ATTR_UNUSED int argc, ATTR_UNUSED char** argv) {
    return false;
+}
+
+static inline void Platform_gettime_realtime(struct timeval* tv, uint64_t* msec) {
+    Generic_gettime_realtime(tv, msec);
+}
+
+static inline void Platform_gettime_monotonic(uint64_t* msec) {
+    Generic_gettime_monotonic(msec);
+}
+
+static inline void* kstat_data_lookup_wrapper(kstat_t* ksp, const char* name) {
+IGNORE_WCASTQUAL_BEGIN
+   return kstat_data_lookup(ksp, (char*)name);
+IGNORE_WCASTQUAL_END
+}
+
+static inline kstat_t* kstat_lookup_wrapper(kstat_ctl_t* kc, const char* ks_module, int ks_instance, const char* ks_name) {
+IGNORE_WCASTQUAL_BEGIN
+   return kstat_lookup(kc, (char*)ks_module, ks_instance, (char*)ks_name);
+IGNORE_WCASTQUAL_END
 }
 
 #endif

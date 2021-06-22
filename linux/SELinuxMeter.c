@@ -5,17 +5,17 @@ Released under the GNU GPLv2, see the COPYING file
 in the source distribution for its full text.
 */
 
-#include "SELinuxMeter.h"
+#include "linux/SELinuxMeter.h"
 
 #include "CRT.h"
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/statfs.h>
 #include <sys/statvfs.h>
 
-#include "Macros.h"
 #include "Object.h"
 #include "XUtils.h"
 
@@ -69,7 +69,7 @@ static bool isSelinuxEnforcing(void) {
    return !!enforce;
 }
 
-static void SELinuxMeter_updateValues(ATTR_UNUSED Meter* this) {
+static void SELinuxMeter_updateValues(Meter* this) {
    enabled = isSelinuxEnabled();
    enforcing = isSelinuxEnforcing();
 

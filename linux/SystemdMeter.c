@@ -5,7 +5,7 @@ Released under the GNU GPLv2, see the COPYING file
 in the source distribution for its full text.
 */
 
-#include "SystemdMeter.h"
+#include "linux/SystemdMeter.h"
 
 #include <dlfcn.h>
 #include <fcntl.h>
@@ -19,6 +19,7 @@ in the source distribution for its full text.
 #include "Macros.h"
 #include "Object.h"
 #include "RichString.h"
+#include "Settings.h"
 #include "XUtils.h"
 
 #if defined(BUILD_STATIC) && defined(HAVE_LIBSYSTEMD)
@@ -195,6 +196,9 @@ dlfailure:
 #endif /* !BUILD_STATIC || HAVE_LIBSYSTEMD */
 
 static void updateViaExec(void) {
+   if (Settings_isReadonly())
+      return;
+
    int fdpair[2];
    if (pipe(fdpair) < 0)
       return;
@@ -302,6 +306,7 @@ static int valueDigitColor(unsigned int value) {
 
 static void SystemdMeter_display(ATTR_UNUSED const Object* cast, RichString* out) {
    char buffer[16];
+   int len;
 
    int color = (systemState && String_eq(systemState, "running")) ? METER_VALUE_OK : METER_VALUE_ERROR;
    RichString_writeAscii(out, CRT_colors[color], systemState ? systemState : "N/A");
@@ -311,40 +316,44 @@ static void SystemdMeter_display(ATTR_UNUSED const Object* cast, RichString* out
    if (nFailedUnits == INVALID_VALUE) {
       buffer[0] = '?';
       buffer[1] = '\0';
+      len = 1;
    } else {
-      xSnprintf(buffer, sizeof(buffer), "%u", nFailedUnits);
+      len = xSnprintf(buffer, sizeof(buffer), "%u", nFailedUnits);
    }
-   RichString_appendAscii(out, zeroDigitColor(nFailedUnits), buffer);
+   RichString_appendnAscii(out, zeroDigitColor(nFailedUnits), buffer, len);
 
    RichString_appendAscii(out, CRT_colors[METER_TEXT], "/");
 
    if (nNames == INVALID_VALUE) {
       buffer[0] = '?';
       buffer[1] = '\0';
+      len = 1;
    } else {
-      xSnprintf(buffer, sizeof(buffer), "%u", nNames);
+      len = xSnprintf(buffer, sizeof(buffer), "%u", nNames);
    }
-   RichString_appendAscii(out, valueDigitColor(nNames), buffer);
+   RichString_appendnAscii(out, valueDigitColor(nNames), buffer, len);
 
    RichString_appendAscii(out, CRT_colors[METER_TEXT], " failed) (");
 
    if (nJobs == INVALID_VALUE) {
       buffer[0] = '?';
       buffer[1] = '\0';
+      len = 1;
    } else {
-      xSnprintf(buffer, sizeof(buffer), "%u", nJobs);
+      len = xSnprintf(buffer, sizeof(buffer), "%u", nJobs);
    }
-   RichString_appendAscii(out, zeroDigitColor(nJobs), buffer);
+   RichString_appendnAscii(out, zeroDigitColor(nJobs), buffer, len);
 
    RichString_appendAscii(out, CRT_colors[METER_TEXT], "/");
 
    if (nInstalledJobs == INVALID_VALUE) {
       buffer[0] = '?';
       buffer[1] = '\0';
+      len = 1;
    } else {
-      xSnprintf(buffer, sizeof(buffer), "%u", nInstalledJobs);
+      len = xSnprintf(buffer, sizeof(buffer), "%u", nInstalledJobs);
    }
-   RichString_appendAscii(out, valueDigitColor(nInstalledJobs), buffer);
+   RichString_appendnAscii(out, valueDigitColor(nInstalledJobs), buffer, len);
 
    RichString_appendAscii(out, CRT_colors[METER_TEXT], " jobs)");
 }
