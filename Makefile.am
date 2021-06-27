@@ -236,6 +236,32 @@ myhtopplatheaders = $(dragonflybsd_platform_headers)
 myhtopplatsources = $(dragonflybsd_platform_sources)
 endif
 
+# NetBSD
+# -------
+
+netbsd_platform_headers = \
+	generic/gettime.h \
+	generic/hostname.h \
+	generic/uname.h \
+	netbsd/Platform.h \
+	netbsd/ProcessField.h \
+	netbsd/NetBSDProcess.h \
+	netbsd/NetBSDProcessList.h
+
+netbsd_platform_sources = \
+	generic/gettime.c \
+	generic/hostname.c \
+	generic/uname.c \
+	netbsd/Platform.c \
+	netbsd/NetBSDProcess.c \
+	netbsd/NetBSDProcessList.c
+
+if HTOP_NETBSD
+myhtopplatprogram = htop
+myhtopplatheaders = $(netbsd_platform_headers)
+myhtopplatsources = $(netbsd_platform_sources)
+endif
+
 # OpenBSD
 # -------
 
