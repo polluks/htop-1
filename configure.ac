@@ -173,6 +173,20 @@ AC_TYPE_UINT16_T
 AC_TYPE_UINT32_T
 AC_TYPE_UINT64_T
 
+AC_MSG_CHECKING(for alloc_size)
+old_CFLAGS="$CFLAGS"
+CFLAGS="$CFLAGS -Wno-error -Werror=attributes"
+AC_COMPILE_IFELSE([
+   AC_LANG_SOURCE(
+      [
+         __attribute__((alloc_size(1))) char* my_alloc(int size) { return 0; }
+      ],[]
+   )],
+   AC_DEFINE([HAVE_ATTR_ALLOC_SIZE], 1, [The alloc_size attribute is supported.])
+   AC_MSG_RESULT(yes),
+   AC_MSG_RESULT(no))
+CFLAGS="$old_CFLAGS"
+
 # ----------------------------------------------------------------------
 
 
@@ -315,8 +329,9 @@ else
     HTOP_CHECK_SCRIPT([ncurses], [wnoutrefresh], [HAVE_LIBNCURSES], [ncurses5-config],
      HTOP_CHECK_LIB([ncurses6],  [doupdate], [HAVE_LIBNCURSES],
       HTOP_CHECK_LIB([ncurses],  [doupdate], [HAVE_LIBNCURSES],
-       AC_MSG_ERROR([can not find required library libncurses])
-   ))))
+       HTOP_CHECK_LIB([curses],  [doupdate], [HAVE_LIBNCURSES],
+        AC_MSG_ERROR([can not find required curses/ncurses library])
+   )))))
 
    AC_CHECK_HEADERS([curses.h], [],
       [AC_CHECK_HEADERS([ncurses/curses.h], [],
@@ -336,6 +351,7 @@ if test "$my_htop_platform" = "solaris"; then
    # Since ncruses macros use the ERR macro, we can not use another name.
    AC_DEFINE([ERR], [(-1)], [Predefine ncurses macro.])
 fi
+AC_CHECK_FUNCS( [set_escdelay] )
 
 
 AC_ARG_ENABLE([hwloc],

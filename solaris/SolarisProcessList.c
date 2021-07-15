@@ -26,7 +26,8 @@ in the source distribution for its full text.
 #include "solaris/SolarisProcess.h"
 
 
-#define MAXCMDLINE 255
+#define GZONE "global    "
+#define UZONE "unknown   "
 
 static int pageSize;
 static int pageSizeKB;
@@ -46,10 +47,10 @@ static char* SolarisProcessList_readZoneName(kstat_ctl_t* kd, SolarisProcess* sp
    return zname;
 }
 
-ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* pidMatchList, uid_t userId) {
+ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* dynamicMeters, Hashtable* pidMatchList, uid_t userId) {
    SolarisProcessList* spl = xCalloc(1, sizeof(SolarisProcessList));
    ProcessList* pl = (ProcessList*) spl;
-   ProcessList_init(pl, Class(SolarisProcess), usersTable, pidMatchList, userId);
+   ProcessList_init(pl, Class(SolarisProcess), usersTable, dynamicMeters, pidMatchList, userId);
 
    spl->kd = kstat_open();
 
@@ -379,8 +380,8 @@ static int SolarisProcessList_walkproc(psinfo_t* _psinfo, lwpsinfo_t* _lwpsinfo,
       free_and_xStrdup(&proc->tty_name, name);
    }
 
-   proc->m_resident         = _psinfo->pr_rssize;	// KB
-   proc->m_virt             = _psinfo->pr_size;		// KB
+   proc->m_resident         = _psinfo->pr_rssize;  // KB
+   proc->m_virt             = _psinfo->pr_size;    // KB
 
    if (proc->st_uid != _psinfo->pr_euid) {
       proc->st_uid          = _psinfo->pr_euid;

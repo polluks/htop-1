@@ -236,7 +236,6 @@ void Platform_setMemoryValues(Meter* this) {
    long int usedMem = pl->usedMem;
    long int buffersMem = pl->buffersMem;
    long int cachedMem = pl->cachedMem;
-   usedMem -= buffersMem + cachedMem;
    this->total = pl->totalMem;
    this->values[0] = usedMem;
    this->values[1] = buffersMem;
@@ -300,14 +299,14 @@ char* Platform_getProcessEnv(pid_t pid) {
 }
 
 char* Platform_getInodeFilename(pid_t pid, ino_t inode) {
-    (void)pid;
-    (void)inode;
-    return NULL;
+   (void)pid;
+   (void)inode;
+   return NULL;
 }
 
 FileLocks_ProcessData* Platform_getProcessLocks(pid_t pid) {
-    (void)pid;
-    return NULL;
+   (void)pid;
+   return NULL;
 }
 
 bool Platform_getDiskIO(DiskIOData* data) {
