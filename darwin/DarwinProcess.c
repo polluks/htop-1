@@ -1,7 +1,7 @@
 /*
 htop - DarwinProcess.c
 (C) 2015 Hisham H. Muhammad
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -37,11 +37,11 @@ const ProcessFieldData Process_fields[LAST_PROCESSFIELD] = {
    [PROCESSOR] = { .name = "PROCESSOR", .title = "CPU ", .description = "Id of the CPU the process last executed on", .flags = 0, },
    [M_VIRT] = { .name = "M_VIRT", .title = " VIRT ", .description = "Total program size in virtual memory", .flags = 0, .defaultSortDesc = true, },
    [M_RESIDENT] = { .name = "M_RESIDENT", .title = "  RES ", .description = "Resident set size, size of the text and data sections, plus stack usage", .flags = 0, .defaultSortDesc = true, },
-   [ST_UID] = { .name = "ST_UID", .title = "  UID ", .description = "User ID of the process owner", .flags = 0, },
+   [ST_UID] = { .name = "ST_UID", .title = "UID", .description = "User ID of the process owner", .flags = 0, },
    [PERCENT_CPU] = { .name = "PERCENT_CPU", .title = "CPU% ", .description = "Percentage of the CPU time the process used in the last sampling", .flags = 0, .defaultSortDesc = true, },
    [PERCENT_NORM_CPU] = { .name = "PERCENT_NORM_CPU", .title = "NCPU%", .description = "Normalized percentage of the CPU time the process used in the last sampling (normalized by cpu count)", .flags = 0, .defaultSortDesc = true, },
    [PERCENT_MEM] = { .name = "PERCENT_MEM", .title = "MEM% ", .description = "Percentage of the memory the process is using, based on resident memory size", .flags = 0, .defaultSortDesc = true, },
-   [USER] = { .name = "USER", .title = "USER      ", .description = "Username of the process owner (or user ID if name cannot be determined)", .flags = 0, },
+   [USER] = { .name = "USER", .title = "USER       ", .description = "Username of the process owner (or user ID if name cannot be determined)", .flags = 0, },
    [TIME] = { .name = "TIME", .title = "  TIME+  ", .description = "Total time the process has spent in user and system time", .flags = 0, .defaultSortDesc = true, },
    [NLWP] = { .name = "NLWP", .title = "NLWP ", .description = "Number of threads in the process", .flags = 0, },
    [TGID] = { .name = "TGID", .title = "TGID", .description = "Thread group ID (i.e. process ID)", .flags = 0, .pidColumn = true, },
@@ -145,7 +145,7 @@ static void DarwinProcess_updateCmdLine(const struct kinfo_proc* k, Process* pro
    }
 
    /* Allocate space for the arguments. */
-   procargs = (char*)xMalloc(argmax);
+   procargs = (char*)malloc(argmax);
    if ( procargs == NULL ) {
       goto ERROR_A;
    }
@@ -269,6 +269,13 @@ ERROR_A:
    Process_updateCmdline(proc, k->kp_proc.p_comm, 0, strlen(k->kp_proc.p_comm));
 }
 
+// Converts nanoseconds to hundredths of a second (centiseconds) as needed by the "time" field of the Process struct.
+static long long int nanosecondsToCentiseconds(uint64_t nanoseconds) {
+   const uint64_t centiseconds_per_second = 100;
+   const uint64_t nanoseconds_per_second = 1e9;
+   return nanoseconds / nanoseconds_per_second * centiseconds_per_second;
+}
+
 void DarwinProcess_setFromKInfoProc(Process* proc, const struct kinfo_proc* ps, bool exists) {
    DarwinProcess* dp = (DarwinProcess*)proc;
 
@@ -315,7 +322,7 @@ void DarwinProcess_setFromKInfoProc(Process* proc, const struct kinfo_proc* ps, 
       DarwinProcess_updateExe(ep->p_pid, proc);
       DarwinProcess_updateCmdLine(ps, proc);
 
-      if (proc->settings->flags & PROCESS_FLAG_CWD) {
+      if (proc->settings->ss->flags & PROCESS_FLAG_CWD) {
          DarwinProcess_updateCwd(ep->p_pid, proc);
       }
    }
@@ -324,27 +331,31 @@ void DarwinProcess_setFromKInfoProc(Process* proc, const struct kinfo_proc* ps, 
    proc->nice = ep->p_nice;
    proc->priority = ep->p_priority;
 
-   proc->state = (ep->p_stat == SZOMB) ? 'Z' : '?';
+   proc->state = (ep->p_stat == SZOMB) ? ZOMBIE : UNKNOWN;
 
    /* Make sure the updated flag is set */
    proc->updated = true;
 }
 
-void DarwinProcess_setFromLibprocPidinfo(DarwinProcess* proc, DarwinProcessList* dpl, double time_interval) {
+void DarwinProcess_setFromLibprocPidinfo(DarwinProcess* proc, DarwinProcessList* dpl, double timeIntervalNS) {
    struct proc_taskinfo pti;
 
    if (sizeof(pti) == proc_pidinfo(proc->super.pid, PROC_PIDTASKINFO, 0, &pti, sizeof(pti))) {
-      uint64_t total_existing_time = proc->stime + proc->utime;
-      uint64_t total_current_time = pti.pti_total_system + pti.pti_total_user;
+      uint64_t total_existing_time_ns = proc->stime + proc->utime;
 
-      if (total_existing_time && 1E-6 < time_interval) {
-         uint64_t total_time_diff = total_current_time - total_existing_time;
-         proc->super.percent_cpu = ((double)total_time_diff / time_interval) * 100.0;
+      uint64_t user_time_ns = Platform_machTicksToNanoseconds(pti.pti_total_user);
+      uint64_t system_time_ns = Platform_machTicksToNanoseconds(pti.pti_total_system);
+
+      uint64_t total_current_time_ns = user_time_ns + system_time_ns;
+
+      if (total_existing_time_ns && 1E-6 < timeIntervalNS) {
+         uint64_t total_time_diff_ns = total_current_time_ns - total_existing_time_ns;
+         proc->super.percent_cpu = ((double)total_time_diff_ns / timeIntervalNS) * 100.0;
       } else {
          proc->super.percent_cpu = 0.0;
       }
 
-      proc->super.time = total_current_time / 10000000;
+      proc->super.time = nanosecondsToCentiseconds(total_current_time_ns);
       proc->super.nlwp = pti.pti_threadnum;
       proc->super.m_virt = pti.pti_virtual_size / ONE_K;
       proc->super.m_resident = pti.pti_resident_size / ONE_K;
@@ -352,8 +363,8 @@ void DarwinProcess_setFromLibprocPidinfo(DarwinProcess* proc, DarwinProcessList*
       proc->super.percent_mem = (double)pti.pti_resident_size * 100.0
                               / (double)dpl->host_info.max_mem;
 
-      proc->stime = pti.pti_total_system;
-      proc->utime = pti.pti_total_user;
+      proc->stime = system_time_ns;
+      proc->utime = user_time_ns;
 
       dpl->super.kernelThreads += 0; /*pti.pti_threads_system;*/
       dpl->super.userlandThreads += pti.pti_threadnum; /*pti.pti_threads_user;*/
@@ -375,7 +386,7 @@ void DarwinProcess_scanThreads(DarwinProcess* dp) {
       return;
    }
 
-   if (proc->state == 'Z') {
+   if (proc->state == ZOMBIE) {
       return;
    }
 
@@ -419,15 +430,15 @@ void DarwinProcess_scanThreads(DarwinProcess* dp) {
    vm_deallocate(mach_task_self(), (vm_address_t) thread_list, sizeof(thread_port_array_t) * thread_count);
    mach_port_deallocate(mach_task_self(), port);
 
-   char state = '?';
+   /* Taken from: https://github.com/apple/darwin-xnu/blob/2ff845c2e033bd0ff64b5b6aa6063a1f8f65aa32/osfmk/mach/thread_info.h#L129 */
    switch (run_state) {
-      case TH_STATE_RUNNING: state = 'R'; break;
-      case TH_STATE_STOPPED: state = 'S'; break;
-      case TH_STATE_WAITING: state = 'W'; break;
-      case TH_STATE_UNINTERRUPTIBLE: state = 'U'; break;
-      case TH_STATE_HALTED: state = 'H'; break;
+      case TH_STATE_RUNNING: proc->state = RUNNING; break;
+      case TH_STATE_STOPPED: proc->state = STOPPED; break;
+      case TH_STATE_WAITING: proc->state = WAITING; break;
+      case TH_STATE_UNINTERRUPTIBLE: proc->state = UNINTERRUPTIBLE_WAIT; break;
+      case TH_STATE_HALTED: proc->state = BLOCKED; break;
+      default: proc->state = UNKNOWN;
    }
-   proc->state = state;
 }
 
 

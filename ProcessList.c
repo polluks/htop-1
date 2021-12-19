@@ -1,7 +1,7 @@
 /*
 htop - ProcessList.c
 (C) 2004,2005 Hisham H. Muhammad
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -12,6 +12,7 @@ in the source distribution for its full text.
 #include <string.h>
 
 #include "CRT.h"
+#include "DynamicColumn.h"
 #include "Hashtable.h"
 #include "Macros.h"
 #include "Platform.h"
@@ -19,7 +20,7 @@ in the source distribution for its full text.
 #include "XUtils.h"
 
 
-ProcessList* ProcessList_init(ProcessList* this, const ObjectClass* klass, UsersTable* usersTable, Hashtable* dynamicMeters, Hashtable* pidMatchList, uid_t userId) {
+ProcessList* ProcessList_init(ProcessList* this, const ObjectClass* klass, UsersTable* usersTable, Hashtable* dynamicMeters, Hashtable* dynamicColumns, Hashtable* pidMatchList, uid_t userId) {
    this->processes = Vector_new(klass, true, DEFAULT_SIZE);
    this->processes2 = Vector_new(klass, true, DEFAULT_SIZE); // tree-view auxiliary buffer
 
@@ -30,11 +31,13 @@ ProcessList* ProcessList_init(ProcessList* this, const ObjectClass* klass, Users
    this->usersTable = usersTable;
    this->pidMatchList = pidMatchList;
    this->dynamicMeters = dynamicMeters;
+   this->dynamicColumns = dynamicColumns;
 
    this->userId = userId;
 
    // set later by platform-specific code
-   this->cpuCount = 0;
+   this->activeCPUs = 0;
+   this->existingCPUs = 0;
    this->monotonicMs = 0;
 
    // always maintain valid realtime timestamps
@@ -82,31 +85,53 @@ void ProcessList_setPanel(ProcessList* this, Panel* panel) {
    this->panel = panel;
 }
 
-static const char* alignedProcessFieldTitle(ProcessField field) {
+static const char* alignedDynamicColumnTitle(const ProcessList* this, int key) {
+   const DynamicColumn* column = Hashtable_get(this->dynamicColumns, key);
+   if (column == NULL)
+      return "- ";
+   static char titleBuffer[DYNAMIC_MAX_COLUMN_WIDTH + /* space */ 1 + /* null terminator */ + 1];
+   int width = column->width;
+   if (!width || abs(width) > DYNAMIC_MAX_COLUMN_WIDTH)
+      width = DYNAMIC_DEFAULT_COLUMN_WIDTH;
+   xSnprintf(titleBuffer, sizeof(titleBuffer), "%*s", width, column->heading);
+   return titleBuffer;
+}
+
+static const char* alignedProcessFieldTitle(const ProcessList* this, ProcessField field) {
+   if (field >= LAST_PROCESSFIELD)
+      return alignedDynamicColumnTitle(this, field);
+
    const char* title = Process_fields[field].title;
    if (!title)
       return "- ";
 
-   if (!Process_fields[field].pidColumn)
-      return title;
+   if (Process_fields[field].pidColumn) {
+      static char titleBuffer[PROCESS_MAX_PID_DIGITS + sizeof(" ")];
+      xSnprintf(titleBuffer, sizeof(titleBuffer), "%*s ", Process_pidDigits, title);
+      return titleBuffer;
+   }
 
-   static char titleBuffer[PROCESS_MAX_PID_DIGITS + /* space */ 1 + /* null-terminator */ + 1];
-   xSnprintf(titleBuffer, sizeof(titleBuffer), "%*s ", Process_pidDigits, title);
+   if (field == ST_UID) {
+      static char titleBuffer[PROCESS_MAX_UID_DIGITS + sizeof(" ")];
+      xSnprintf(titleBuffer, sizeof(titleBuffer), "%*s ", Process_uidDigits, title);
+      return titleBuffer;
+   }
 
-   return titleBuffer;
+   return title;
 }
 
 void ProcessList_printHeader(const ProcessList* this, RichString* header) {
    RichString_rewind(header, RichString_size(header));
 
    const Settings* settings = this->settings;
-   const ProcessField* fields = settings->fields;
+   const ScreenSettings* ss = settings->ss;
+   const ProcessField* fields = ss->fields;
 
-   ProcessField key = Settings_getActiveSortKey(settings);
+   ProcessField key = ScreenSettings_getActiveSortKey(ss);
 
    for (int i = 0; fields[i]; i++) {
       int color;
-      if (settings->treeView && settings->treeViewAlwaysByPID) {
+      if (ss->treeView && ss->treeViewAlwaysByPID) {
          color = CRT_colors[PANEL_HEADER_FOCUS];
       } else if (key == fields[i]) {
          color = CRT_colors[PANEL_SELECTION_FOCUS];
@@ -114,12 +139,13 @@ void ProcessList_printHeader(const ProcessList* this, RichString* header) {
          color = CRT_colors[PANEL_HEADER_FOCUS];
       }
 
-      RichString_appendWide(header, color, alignedProcessFieldTitle(fields[i]));
+      RichString_appendWide(header, color, alignedProcessFieldTitle(this, fields[i]));
       if (key == fields[i] && RichString_getCharVal(*header, RichString_size(header) - 1) == ' ') {
+         bool ascending = ScreenSettings_getActiveDirection(ss) == 1;
          RichString_rewind(header, 1);  // rewind to override space
          RichString_appendnWide(header,
                                 CRT_colors[PANEL_SELECTION_FOCUS],
-                                CRT_treeStr[Settings_getActiveDirection(this->settings) == 1 ? TREE_STR_ASC : TREE_STR_DESC],
+                                CRT_treeStr[ascending ? TREE_STR_ASC : TREE_STR_DESC],
                                 1);
       }
       if (COMM == fields[i] && settings->showMergedCommand) {
@@ -378,7 +404,7 @@ static int ProcessList_treeProcessCompareByPID(const void* v1, const void* v2) {
 static void ProcessList_buildTree(ProcessList* this) {
    int node_counter = 1;
    int node_index = 0;
-   int direction = Settings_getActiveDirection(this->settings);
+   int direction = ScreenSettings_getActiveDirection(this->settings->ss);
 
    // Sort by PID
    Vector_quickSortCustomCompare(this->processes, ProcessList_treeProcessCompareByPID);
@@ -464,7 +490,7 @@ static void ProcessList_buildTree(ProcessList* this) {
 }
 
 void ProcessList_sort(ProcessList* this) {
-   if (this->settings->treeView) {
+   if (this->settings->ss->treeView) {
       ProcessList_updateTreeSet(this);
       Vector_quickSortCustomCompare(this->processes, ProcessList_treeProcessCompare);
    } else {
@@ -474,10 +500,10 @@ void ProcessList_sort(ProcessList* this) {
 
 ProcessField ProcessList_keyAt(const ProcessList* this, int at) {
    int x = 0;
-   const ProcessField* fields = this->settings->fields;
+   const ProcessField* fields = this->settings->ss->fields;
    ProcessField field;
    for (int i = 0; (field = fields[i]); i++) {
-      int len = strlen(alignedProcessFieldTitle(field));
+      int len = strlen(alignedProcessFieldTitle(this, field));
       if (at >= x && at <= x + len) {
          return field;
       }
@@ -608,9 +634,14 @@ void ProcessList_scan(ProcessList* this, bool pauseProcessUpdate) {
 
    ProcessList_goThroughEntries(this, false);
 
+   uid_t maxUid = 0;
    for (int i = Vector_size(this->processes) - 1; i >= 0; i--) {
       Process* p = (Process*) Vector_get(this->processes, i);
       Process_makeCommandStr(p);
+
+      // keep track of the highest UID for column scaling
+      if (p->st_uid > maxUid)
+         maxUid = p->st_uid;
 
       if (p->tombStampMs > 0) {
          // remove tombed process
@@ -629,7 +660,10 @@ void ProcessList_scan(ProcessList* this, bool pauseProcessUpdate) {
       }
    }
 
-   if (this->settings->treeView) {
+   // Set UID column width based on max UID.
+   Process_setUidColumnWidth(maxUid);
+
+   if (this->settings->ss->treeView) {
       // Clear out the hashtable to avoid any left-over processes from previous build
       //
       // The sorting algorithm relies on the fact that

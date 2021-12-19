@@ -2,7 +2,7 @@
 htop - Affinity.c
 (C) 2004-2011 Hisham H. Muhammad
 (C) 2020 Red Hat, Inc.  All Rights Reserved.
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -22,7 +22,7 @@ in the source distribution for its full text.
 #else
 #define HTOP_HWLOC_CPUBIND_FLAG HWLOC_CPUBIND_PROCESS
 #endif
-#elif defined(HAVE_LINUX_AFFINITY)
+#elif defined(HAVE_AFFINITY)
 #include <sched.h>
 #endif
 
@@ -59,13 +59,13 @@ Affinity* Affinity_get(const Process* proc, ProcessList* pl) {
    if (ok) {
       affinity = Affinity_new(pl);
       if (hwloc_bitmap_last(cpuset) == -1) {
-         for (unsigned int i = 0; i < pl->cpuCount; i++) {
+         for (unsigned int i = 0; i < pl->existingCPUs; i++) {
             Affinity_add(affinity, i);
          }
       } else {
-         unsigned int id;
-         hwloc_bitmap_foreach_begin(id, cpuset);
-         Affinity_add(affinity, id);
+         int id;
+         hwloc_bitmap_foreach_begin(id, cpuset)
+            Affinity_add(affinity, (unsigned)id);
          hwloc_bitmap_foreach_end();
       }
    }
@@ -84,7 +84,7 @@ bool Affinity_set(Process* proc, Arg arg) {
    return ok;
 }
 
-#elif defined(HAVE_LINUX_AFFINITY)
+#elif defined(HAVE_AFFINITY)
 
 Affinity* Affinity_get(const Process* proc, ProcessList* pl) {
    cpu_set_t cpuset;
@@ -93,7 +93,7 @@ Affinity* Affinity_get(const Process* proc, ProcessList* pl) {
       return NULL;
 
    Affinity* affinity = Affinity_new(pl);
-   for (unsigned int i = 0; i < pl->cpuCount; i++) {
+   for (unsigned int i = 0; i < pl->existingCPUs; i++) {
       if (CPU_ISSET(i, &cpuset)) {
          Affinity_add(affinity, i);
       }

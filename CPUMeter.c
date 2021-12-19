@@ -1,7 +1,7 @@
 /*
 htop - CPUMeter.c
 (C) 2004-2011 Hisham H. Muhammad
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -10,7 +10,6 @@ in the source distribution for its full text.
 #include "CPUMeter.h"
 
 #include <math.h>
-#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -43,7 +42,7 @@ static void CPUMeter_init(Meter* this) {
    unsigned int cpu = this->param;
    if (cpu == 0) {
       Meter_setCaption(this, "Avg");
-   } else if (this->pl->cpuCount > 1) {
+   } else if (this->pl->activeCPUs > 1) {
       char caption[10];
       xSnprintf(caption, sizeof(caption), "%3u", Settings_cpuId(this->pl->settings, cpu - 1));
       Meter_setCaption(this, caption);
@@ -53,26 +52,29 @@ static void CPUMeter_init(Meter* this) {
 // Custom uiName runtime logic to include the param (processor)
 static void CPUMeter_getUiName(const Meter* this, char* buffer, size_t length) {
    if (this->param > 0)
-      xSnprintf(buffer, sizeof(length), "%s %u", Meter_uiName(this), this->param);
+      xSnprintf(buffer, length, "%s %u", Meter_uiName(this), this->param);
    else
-      xSnprintf(buffer, sizeof(length), "%s", Meter_uiName(this));
+      xSnprintf(buffer, length, "%s", Meter_uiName(this));
 }
 
 static void CPUMeter_updateValues(Meter* this) {
+   memset(this->values, 0, sizeof(double) * CPU_METER_ITEMCOUNT);
+
    unsigned int cpu = this->param;
-   if (cpu > this->pl->cpuCount) {
+   if (cpu > this->pl->existingCPUs) {
       xSnprintf(this->txtBuffer, sizeof(this->txtBuffer), "absent");
-      for (uint8_t i = 0; i < this->curItems; i++)
-         this->values[i] = 0;
       return;
    }
-   memset(this->values, 0, sizeof(double) * CPU_METER_ITEMCOUNT);
+
+   double percent = Platform_setCPUValues(this, cpu);
+   if (isnan(percent)) {
+      xSnprintf(this->txtBuffer, sizeof(this->txtBuffer), "offline");
+      return;
+   }
 
    char cpuUsageBuffer[8] = { 0 };
    char cpuFrequencyBuffer[16] = { 0 };
    char cpuTemperatureBuffer[16] = { 0 };
-
-   double percent = Platform_setCPUValues(this, cpu);
 
    if (this->pl->settings->showCPUUsage) {
       xSnprintf(cpuUsageBuffer, sizeof(cpuUsageBuffer), "%.1f%%", percent);
@@ -112,10 +114,16 @@ static void CPUMeter_display(const Object* cast, RichString* out) {
    int len;
    const Meter* this = (const Meter*)cast;
 
-   if (this->param > this->pl->cpuCount) {
-      RichString_appendAscii(out, CRT_colors[METER_TEXT], "absent");
+   if (this->param > this->pl->existingCPUs) {
+      RichString_appendAscii(out, CRT_colors[METER_SHADOW], " absent");
       return;
    }
+
+   if (this->curItems == 0) {
+      RichString_appendAscii(out, CRT_colors[METER_SHADOW], " offline");
+      return;
+   }
+
    len = xSnprintf(buffer, sizeof(buffer), "%5.1f%% ", this->values[CPU_METER_NORMAL]);
    RichString_appendAscii(out, CRT_colors[METER_TEXT], ":");
    RichString_appendnAscii(out, CRT_colors[CPU_NORMAL], buffer, len);
@@ -206,7 +214,7 @@ static void AllCPUsMeter_updateValues(Meter* this) {
 }
 
 static void CPUMeterCommonInit(Meter* this, int ncol) {
-   unsigned int cpus = this->pl->cpuCount;
+   unsigned int cpus = this->pl->existingCPUs;
    CPUMeterData* data = this->meterData;
    if (!data) {
       data = this->meterData = xMalloc(sizeof(CPUMeterData));
@@ -373,6 +381,7 @@ const MeterClass AllCPUs2Meter_class = {
    },
    .updateValues = AllCPUsMeter_updateValues,
    .defaultMode = CUSTOM_METERMODE,
+   .isMultiColumn = true,
    .total = 100.0,
    .attributes = CPUMeter_attributes,
    .name = "AllCPUs2",
@@ -393,6 +402,7 @@ const MeterClass LeftCPUsMeter_class = {
    },
    .updateValues = AllCPUsMeter_updateValues,
    .defaultMode = CUSTOM_METERMODE,
+   .isMultiColumn = true,
    .total = 100.0,
    .attributes = CPUMeter_attributes,
    .name = "LeftCPUs",
@@ -413,6 +423,7 @@ const MeterClass RightCPUsMeter_class = {
    },
    .updateValues = AllCPUsMeter_updateValues,
    .defaultMode = CUSTOM_METERMODE,
+   .isMultiColumn = true,
    .total = 100.0,
    .attributes = CPUMeter_attributes,
    .name = "RightCPUs",
@@ -433,6 +444,7 @@ const MeterClass LeftCPUs2Meter_class = {
    },
    .updateValues = AllCPUsMeter_updateValues,
    .defaultMode = CUSTOM_METERMODE,
+   .isMultiColumn = true,
    .total = 100.0,
    .attributes = CPUMeter_attributes,
    .name = "LeftCPUs2",
@@ -453,6 +465,7 @@ const MeterClass RightCPUs2Meter_class = {
    },
    .updateValues = AllCPUsMeter_updateValues,
    .defaultMode = CUSTOM_METERMODE,
+   .isMultiColumn = true,
    .total = 100.0,
    .attributes = CPUMeter_attributes,
    .name = "RightCPUs2",
@@ -473,6 +486,7 @@ const MeterClass AllCPUs4Meter_class = {
    },
    .updateValues = AllCPUsMeter_updateValues,
    .defaultMode = CUSTOM_METERMODE,
+   .isMultiColumn = true,
    .total = 100.0,
    .attributes = CPUMeter_attributes,
    .name = "AllCPUs4",
@@ -493,6 +507,7 @@ const MeterClass LeftCPUs4Meter_class = {
    },
    .updateValues = AllCPUsMeter_updateValues,
    .defaultMode = CUSTOM_METERMODE,
+   .isMultiColumn = true,
    .total = 100.0,
    .attributes = CPUMeter_attributes,
    .name = "LeftCPUs4",
@@ -513,6 +528,7 @@ const MeterClass RightCPUs4Meter_class = {
    },
    .updateValues = AllCPUsMeter_updateValues,
    .defaultMode = CUSTOM_METERMODE,
+   .isMultiColumn = true,
    .total = 100.0,
    .attributes = CPUMeter_attributes,
    .name = "RightCPUs4",
@@ -533,6 +549,7 @@ const MeterClass AllCPUs8Meter_class = {
    },
    .updateValues = AllCPUsMeter_updateValues,
    .defaultMode = CUSTOM_METERMODE,
+   .isMultiColumn = true,
    .total = 100.0,
    .attributes = CPUMeter_attributes,
    .name = "AllCPUs8",
@@ -553,6 +570,7 @@ const MeterClass LeftCPUs8Meter_class = {
    },
    .updateValues = AllCPUsMeter_updateValues,
    .defaultMode = CUSTOM_METERMODE,
+   .isMultiColumn = true,
    .total = 100.0,
    .attributes = CPUMeter_attributes,
    .name = "LeftCPUs8",
@@ -573,6 +591,7 @@ const MeterClass RightCPUs8Meter_class = {
    },
    .updateValues = AllCPUsMeter_updateValues,
    .defaultMode = CUSTOM_METERMODE,
+   .isMultiColumn = true,
    .total = 100.0,
    .attributes = CPUMeter_attributes,
    .name = "RightCPUs8",

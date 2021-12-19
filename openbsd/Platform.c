@@ -2,7 +2,7 @@
 htop - openbsd/Platform.c
 (C) 2014 Hisham H. Muhammad
 (C) 2015 Michael McConville
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -32,6 +32,7 @@ in the source distribution for its full text.
 #include "LoadAverageMeter.h"
 #include "Macros.h"
 #include "MemoryMeter.h"
+#include "MemorySwapMeter.h"
 #include "Meter.h"
 #include "ProcessList.h"
 #include "Settings.h"
@@ -45,7 +46,15 @@ in the source distribution for its full text.
 #include "openbsd/OpenBSDProcessList.h"
 
 
-const ProcessField Platform_defaultFields[] = { PID, USER, PRIORITY, NICE, M_VIRT, M_RESIDENT, STATE, PERCENT_CPU, PERCENT_MEM, TIME, COMM, 0 };
+const ScreenDefaults Platform_defaultScreens[] = {
+   {
+      .name = "Main",
+      .columns = "PID USER PRIORITY NICE M_VIRT M_RESIDENT STATE PERCENT_CPU PERCENT_MEM TIME Command",
+      .sortKey = "PERCENT_CPU",
+   },
+};
+
+const unsigned int Platform_numberOfDefaultScreens = ARRAYSIZE(Platform_defaultScreens);
 
 /*
  * See /usr/include/sys/signal.h
@@ -98,6 +107,7 @@ const MeterClass* const Platform_meterTypes[] = {
    &LoadMeter_class,
    &MemoryMeter_class,
    &SwapMeter_class,
+   &MemorySwapMeter_class,
    &TasksMeter_class,
    &UptimeMeter_class,
    &BatteryMeter_class,
@@ -119,8 +129,9 @@ const MeterClass* const Platform_meterTypes[] = {
    NULL
 };
 
-void Platform_init(void) {
+bool Platform_init(void) {
    /* no platform-specific setup needed */
+   return true;
 }
 
 void Platform_done(void) {
@@ -169,10 +180,17 @@ int Platform_getMaxPid() {
 
 double Platform_setCPUValues(Meter* this, unsigned int cpu) {
    const OpenBSDProcessList* pl = (const OpenBSDProcessList*) this->pl;
-   const CPUData* cpuData = &(pl->cpus[cpu]);
-   double total = cpuData->totalPeriod == 0 ? 1 : cpuData->totalPeriod;
+   const CPUData* cpuData = &(pl->cpuData[cpu]);
+   double total;
    double totalPercent;
    double* v = this->values;
+
+   if (!cpuData->online) {
+      this->curItems = 0;
+      return NAN;
+   }
+
+   total = cpuData->totalPeriod == 0 ? 1 : cpuData->totalPeriod;
 
    v[CPU_METER_NICE] = cpuData->nicePeriod / total * 100.0;
    v[CPU_METER_NORMAL] = cpuData->userPeriod / total * 100.0;

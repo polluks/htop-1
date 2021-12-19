@@ -1,3 +1,11 @@
+if !HTOP_PCP
+bin_PROGRAMS = htop
+myhtopplatprogram = htop.c
+else
+bin_PROGRAMS = pcp-htop
+myhtopplatprogram = pcp-htop.c
+endif
+
 dist_man_MANS = htop.1
 EXTRA_DIST = \
 	$(dist_man_MANS) \
@@ -39,11 +47,13 @@ myhtopsources = \
 	DateTimeMeter.c \
 	DiskIOMeter.c \
 	DisplayOptionsPanel.c \
+	DynamicColumn.c \
 	DynamicMeter.c \
 	EnvScreen.c \
 	FunctionBar.c \
 	Hashtable.c \
 	Header.c \
+	HeaderOptionsPanel.c \
 	HostnameMeter.c \
 	IncSet.c \
 	InfoScreen.c \
@@ -51,6 +61,7 @@ myhtopsources = \
 	LoadAverageMeter.c \
 	MainPanel.c \
 	MemoryMeter.c \
+	MemorySwapMeter.c \
 	Meter.c \
 	MetersPanel.c \
 	NetworkIOMeter.c \
@@ -63,6 +74,7 @@ myhtopsources = \
 	ProcessLocksScreen.c \
 	RichString.c \
 	ScreenManager.c \
+	ScreensPanel.c \
 	Settings.c \
 	SignalsPanel.c \
 	SwapMeter.c \
@@ -94,11 +106,14 @@ myhtopheaders = \
 	DateTimeMeter.h \
 	DiskIOMeter.h \
 	DisplayOptionsPanel.h \
+	DynamicColumn.h \
 	DynamicMeter.h \
 	EnvScreen.h \
 	FunctionBar.h \
 	Hashtable.h \
 	Header.h \
+	HeaderLayout.h \
+	HeaderOptionsPanel.h \
 	HostnameMeter.h \
 	IncSet.h \
 	InfoScreen.h \
@@ -107,6 +122,7 @@ myhtopheaders = \
 	Macros.h \
 	MainPanel.h \
 	MemoryMeter.h \
+	MemorySwapMeter.h \
 	Meter.h \
 	MetersPanel.h \
 	NetworkIOMeter.h \
@@ -120,6 +136,7 @@ myhtopheaders = \
 	ProvideCurses.h \
 	RichString.h \
 	ScreenManager.h \
+	ScreensPanel.h \
 	Settings.h \
 	SignalsPanel.h \
 	SwapMeter.h \
@@ -138,6 +155,7 @@ linux_platform_headers = \
 	generic/gettime.h \
 	generic/hostname.h \
 	generic/uname.h \
+	linux/CGroupUtils.h \
 	linux/HugePageMeter.h \
 	linux/IOPriority.h \
 	linux/IOPriorityPanel.h \
@@ -159,6 +177,7 @@ linux_platform_sources = \
 	generic/gettime.c \
 	generic/hostname.c \
 	generic/uname.c \
+	linux/CGroupUtils.c \
 	linux/HugePageMeter.c \
 	linux/IOPriorityPanel.c \
 	linux/LibSensors.c \
@@ -174,7 +193,6 @@ linux_platform_sources = \
 
 if HTOP_LINUX
 AM_LDFLAGS += -rdynamic
-myhtopplatprogram = htop
 myhtopplatheaders = $(linux_platform_headers)
 myhtopplatsources = $(linux_platform_sources)
 endif
@@ -207,7 +225,6 @@ freebsd_platform_sources = \
 	zfs/ZfsCompressedArcMeter.c
 
 if HTOP_FREEBSD
-myhtopplatprogram = htop
 myhtopplatheaders = $(freebsd_platform_headers)
 myhtopplatsources = $(freebsd_platform_sources)
 endif
@@ -233,7 +250,6 @@ dragonflybsd_platform_sources = \
 	generic/uname.c
 
 if HTOP_DRAGONFLYBSD
-myhtopplatprogram = htop
 myhtopplatheaders = $(dragonflybsd_platform_headers)
 myhtopplatsources = $(dragonflybsd_platform_sources)
 endif
@@ -259,7 +275,6 @@ netbsd_platform_sources = \
 	netbsd/NetBSDProcessList.c
 
 if HTOP_NETBSD
-myhtopplatprogram = htop
 myhtopplatheaders = $(netbsd_platform_headers)
 myhtopplatsources = $(netbsd_platform_sources)
 endif
@@ -285,7 +300,6 @@ openbsd_platform_sources = \
 	openbsd/Platform.c
 
 if HTOP_OPENBSD
-myhtopplatprogram = htop
 myhtopplatheaders = $(openbsd_platform_headers)
 myhtopplatsources = $(openbsd_platform_sources)
 endif
@@ -297,6 +311,7 @@ darwin_platform_headers = \
 	darwin/DarwinProcess.h \
 	darwin/DarwinProcessList.h \
 	darwin/Platform.h \
+	darwin/PlatformHelpers.h \
 	darwin/ProcessField.h \
 	generic/gettime.h \
 	generic/hostname.h \
@@ -308,6 +323,7 @@ darwin_platform_headers = \
 
 darwin_platform_sources = \
 	darwin/Platform.c \
+	darwin/PlatformHelpers.c \
 	darwin/DarwinProcess.c \
 	darwin/DarwinProcessList.c \
 	generic/gettime.c \
@@ -319,7 +335,6 @@ darwin_platform_sources = \
 
 if HTOP_DARWIN
 AM_LDFLAGS += -framework IOKit -framework CoreFoundation
-myhtopplatprogram = htop
 myhtopplatheaders = $(darwin_platform_headers)
 myhtopplatsources = $(darwin_platform_sources)
 endif
@@ -350,7 +365,6 @@ solaris_platform_sources = \
 	zfs/ZfsCompressedArcMeter.c
 
 if HTOP_SOLARIS
-myhtopplatprogram = htop
 myhtopplatheaders = $(solaris_platform_headers)
 myhtopplatsources = $(solaris_platform_sources)
 endif
@@ -359,33 +373,36 @@ endif
 # --------------------------
 
 pcp_platform_headers = \
+	linux/PressureStallMeter.h \
+	linux/ZramMeter.h \
+	linux/ZramStats.h \
+	pcp/PCPDynamicColumn.h \
 	pcp/PCPDynamicMeter.h \
+	pcp/PCPMetric.h \
 	pcp/PCPProcess.h \
 	pcp/PCPProcessList.h \
 	pcp/Platform.h \
 	pcp/ProcessField.h \
-	linux/PressureStallMeter.h \
-	linux/ZramMeter.h \
-	linux/ZramStats.h \
 	zfs/ZfsArcMeter.h \
 	zfs/ZfsArcStats.h \
 	zfs/ZfsCompressedArcMeter.h
 
 pcp_platform_sources = \
+	linux/PressureStallMeter.c \
+	linux/ZramMeter.c \
+	pcp/PCPDynamicColumn.c \
 	pcp/PCPDynamicMeter.c \
+	pcp/PCPMetric.c \
 	pcp/PCPProcess.c \
 	pcp/PCPProcessList.c \
 	pcp/Platform.c \
-	linux/PressureStallMeter.c \
-	linux/ZramMeter.c \
 	zfs/ZfsArcMeter.c \
 	zfs/ZfsCompressedArcMeter.c
 
 if HTOP_PCP
-myhtopplatprogram = pcp-htop
 myhtopplatheaders = $(pcp_platform_headers)
 myhtopplatsources = $(pcp_platform_sources)
-pcp_htop_SOURCES  = $(myhtopplatprogram).c $(myhtopheaders) $(myhtopplatheaders) $(myhtopsources) $(myhtopplatsources)
+pcp_htop_SOURCES  = $(myhtopplatprogram) $(myhtopheaders) $(myhtopplatheaders) $(myhtopsources) $(myhtopplatsources)
 endif
 
 # Unsupported
@@ -405,15 +422,13 @@ unsupported_platform_sources = \
 	unsupported/UnsupportedProcessList.c
 
 if HTOP_UNSUPPORTED
-myhtopplatprogram = htop
 myhtopplatsources = $(unsupported_platform_sources)
 myhtopplatheaders = $(unsupported_platform_headers)
 endif
 
 # ----
 
-bin_PROGRAMS = $(myhtopplatprogram)
-htop_SOURCES = $(myhtopplatprogram).c $(myhtopheaders) $(myhtopplatheaders) $(myhtopsources) $(myhtopplatsources)
+htop_SOURCES = $(myhtopplatprogram) $(myhtopheaders) $(myhtopplatheaders) $(myhtopsources) $(myhtopplatsources)
 nodist_htop_SOURCES = config.h
 
 target:
@@ -423,7 +438,7 @@ profile:
 	$(MAKE) all AM_CPPFLAGS="-pg -O2 -DNDEBUG"
 
 debug:
-	$(MAKE) all AM_CPPFLAGS="-ggdb3 -Og" CFLAGS="$(patsubst -O%,,$(CFLAGS))"
+	$(MAKE) all AM_CPPFLAGS="-ggdb3 -Og" CFLAGS="`printf ' %s ' "$(CFLAGS)"|sed -E 's#[[:space:]]-O[^[:space:]]+[[:space:]]# #g'` -ggdb3 -Og"
 
 coverage:
 	$(MAKE) all AM_CPPFLAGS="-fprofile-arcs -ftest-coverage" AM_LDFLAGS="-lgcov"

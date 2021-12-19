@@ -1,7 +1,7 @@
 /*
 htop - LoadAverageMeter.c
 (C) 2004-2011 Hisham H. Muhammad
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -47,12 +47,12 @@ static void LoadAverageMeter_updateValues(Meter* this) {
    if (this->values[0] < 1.0) {
       this->curAttributes = OK_attributes;
       this->total = 1.0;
-   } else if (this->values[0] < this->pl->cpuCount) {
+   } else if (this->values[0] < this->pl->activeCPUs) {
       this->curAttributes = Medium_attributes;
-      this->total = this->pl->cpuCount;
+      this->total = this->pl->activeCPUs;
    } else {
       this->curAttributes = High_attributes;
-      this->total = 2 * this->pl->cpuCount;
+      this->total = 2 * this->pl->activeCPUs;
    }
 
    xSnprintf(this->txtBuffer, sizeof(this->txtBuffer), "%.2f/%.2f/%.2f", this->values[0], this->values[1], this->values[2]);
@@ -79,12 +79,12 @@ static void LoadMeter_updateValues(Meter* this) {
    if (this->values[0] < 1.0) {
       this->curAttributes = OK_attributes;
       this->total = 1.0;
-   } else if (this->values[0] < this->pl->cpuCount) {
+   } else if (this->values[0] < this->pl->activeCPUs) {
       this->curAttributes = Medium_attributes;
-      this->total = this->pl->cpuCount;
+      this->total = this->pl->activeCPUs;
    } else {
       this->curAttributes = High_attributes;
-      this->total = 2 * this->pl->cpuCount;
+      this->total = 2 * this->pl->activeCPUs;
    }
 
    xSnprintf(this->txtBuffer, sizeof(this->txtBuffer), "%.2f", this->values[0]);

@@ -2,17 +2,15 @@
 htop - LinuxProcess.c
 (C) 2014 Hisham H. Muhammad
 (C) 2020 Red Hat, Inc.  All Rights Reserved.
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
 #include "linux/LinuxProcess.h"
 
-#include <assert.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <syscall.h>
 #include <unistd.h>
 
@@ -58,12 +56,11 @@ const ProcessFieldData Process_fields[LAST_PROCESSFIELD] = {
    [M_TRS] = { .name = "M_TRS", .title = " CODE ", .description = "Size of the text segment of the process", .flags = 0, .defaultSortDesc = true, },
    [M_DRS] = { .name = "M_DRS", .title = " DATA ", .description = "Size of the data segment plus stack usage of the process", .flags = 0, .defaultSortDesc = true, },
    [M_LRS] = { .name = "M_LRS", .title = "  LIB ", .description = "The library size of the process (calculated from memory maps)", .flags = PROCESS_FLAG_LINUX_LRS_FIX, .defaultSortDesc = true, },
-   [M_DT] = { .name = "M_DT", .title = " DIRTY ", .description = "Size of the dirty pages of the process (unused since Linux 2.6; always 0)", .flags = 0, .defaultSortDesc = true, },
-   [ST_UID] = { .name = "ST_UID", .title = "  UID ", .description = "User ID of the process owner", .flags = 0, },
+   [ST_UID] = { .name = "ST_UID", .title = "UID", .description = "User ID of the process owner", .flags = 0, },
    [PERCENT_CPU] = { .name = "PERCENT_CPU", .title = "CPU% ", .description = "Percentage of the CPU time the process used in the last sampling", .flags = 0, .defaultSortDesc = true, },
    [PERCENT_NORM_CPU] = { .name = "PERCENT_NORM_CPU", .title = "NCPU%", .description = "Normalized percentage of the CPU time the process used in the last sampling (normalized by cpu count)", .flags = 0, .defaultSortDesc = true, },
    [PERCENT_MEM] = { .name = "PERCENT_MEM", .title = "MEM% ", .description = "Percentage of the memory the process is using, based on resident memory size", .flags = 0, .defaultSortDesc = true, },
-   [USER] = { .name = "USER", .title = "USER      ", .description = "Username of the process owner (or user ID if name cannot be determined)", .flags = 0, },
+   [USER] = { .name = "USER", .title = "USER       ", .description = "Username of the process owner (or user ID if name cannot be determined)", .flags = 0, },
    [TIME] = { .name = "TIME", .title = "  TIME+  ", .description = "Total time the process has spent in user and system time", .flags = 0, .defaultSortDesc = true, },
    [NLWP] = { .name = "NLWP", .title = "NLWP ", .description = "Number of threads in the process", .flags = 0, .defaultSortDesc = true, },
    [TGID] = { .name = "TGID", .title = "TGID", .description = "Thread group ID (i.e. process ID)", .flags = 0, .pidColumn = true, },
@@ -84,22 +81,25 @@ const ProcessFieldData Process_fields[LAST_PROCESSFIELD] = {
    [IO_READ_RATE] = { .name = "IO_READ_RATE", .title = " DISK READ  ", .description = "The I/O rate of read(2) in bytes per second for the process", .flags = PROCESS_FLAG_IO, .defaultSortDesc = true, },
    [IO_WRITE_RATE] = { .name = "IO_WRITE_RATE", .title = " DISK WRITE ", .description = "The I/O rate of write(2) in bytes per second for the process", .flags = PROCESS_FLAG_IO, .defaultSortDesc = true, },
    [IO_RATE] = { .name = "IO_RATE", .title = "   DISK R/W ", .description = "Total I/O rate in bytes per second", .flags = PROCESS_FLAG_IO, .defaultSortDesc = true, },
-   [CGROUP] = { .name = "CGROUP", .title = "    CGROUP ", .description = "Which cgroup the process is in", .flags = PROCESS_FLAG_LINUX_CGROUP, },
+   [CGROUP] = { .name = "CGROUP", .title = "CGROUP (raw)                        ", .description = "Which cgroup the process is in", .flags = PROCESS_FLAG_LINUX_CGROUP, },
+   [CCGROUP] = { .name = "CCGROUP", .title = "CGROUP (compressed)                 ", .description = "Which cgroup the process is in (condensed to essentials)", .flags = PROCESS_FLAG_LINUX_CGROUP, },
    [OOM] = { .name = "OOM", .title = " OOM ", .description = "OOM (Out-of-Memory) killer score", .flags = PROCESS_FLAG_LINUX_OOM, .defaultSortDesc = true, },
    [IO_PRIORITY] = { .name = "IO_PRIORITY", .title = "IO ", .description = "I/O priority", .flags = PROCESS_FLAG_LINUX_IOPRIO, },
 #ifdef HAVE_DELAYACCT
-   [PERCENT_CPU_DELAY] = { .name = "PERCENT_CPU_DELAY", .title = "CPUD% ", .description = "CPU delay %", .flags = PROCESS_FLAG_LINUX_DELAYACCT, .defaultSortDesc = true, },
+   [PERCENT_CPU_DELAY] = { .name = "PERCENT_CPU_DELAY", .title = "CPUD%", .description = "CPU delay %", .flags = PROCESS_FLAG_LINUX_DELAYACCT, .defaultSortDesc = true, },
    [PERCENT_IO_DELAY] = { .name = "PERCENT_IO_DELAY", .title = "IOD% ", .description = "Block I/O delay %", .flags = PROCESS_FLAG_LINUX_DELAYACCT, .defaultSortDesc = true, },
-   [PERCENT_SWAP_DELAY] = { .name = "PERCENT_SWAP_DELAY", .title = "SWAPD% ", .description = "Swapin delay %", .flags = PROCESS_FLAG_LINUX_DELAYACCT, .defaultSortDesc = true, },
+   [PERCENT_SWAP_DELAY] = { .name = "PERCENT_SWAP_DELAY", .title = "SWPD%", .description = "Swapin delay %", .flags = PROCESS_FLAG_LINUX_DELAYACCT, .defaultSortDesc = true, },
 #endif
    [M_PSS] = { .name = "M_PSS", .title = "  PSS ", .description = "proportional set size, same as M_RESIDENT but each page is divided by the number of processes sharing it", .flags = PROCESS_FLAG_LINUX_SMAPS, .defaultSortDesc = true, },
    [M_SWAP] = { .name = "M_SWAP", .title = " SWAP ", .description = "Size of the process's swapped pages", .flags = PROCESS_FLAG_LINUX_SMAPS, .defaultSortDesc = true, },
    [M_PSSWP] = { .name = "M_PSSWP", .title = " PSSWP ", .description = "shows proportional swap share of this mapping, unlike \"Swap\", this does not take into account swapped out page of underlying shmem objects", .flags = PROCESS_FLAG_LINUX_SMAPS, .defaultSortDesc = true, },
    [CTXT] = { .name = "CTXT", .title = " CTXT ", .description = "Context switches (incremental sum of voluntary_ctxt_switches and nonvoluntary_ctxt_switches)", .flags = PROCESS_FLAG_LINUX_CTXT, .defaultSortDesc = true, },
-   [SECATTR] = { .name = "SECATTR", .title = " Security Attribute ", .description = "Security attribute of the process (e.g. SELinux or AppArmor)", .flags = PROCESS_FLAG_LINUX_SECATTR, },
+   [SECATTR] = { .name = "SECATTR", .title = "Security Attribute             ", .description = "Security attribute of the process (e.g. SELinux or AppArmor)", .flags = PROCESS_FLAG_LINUX_SECATTR, },
    [PROC_COMM] = { .name = "COMM", .title = "COMM            ", .description = "comm string of the process from /proc/[pid]/comm", .flags = 0, },
    [PROC_EXE] = { .name = "EXE", .title = "EXE             ", .description = "Basename of exe of the process from /proc/[pid]/exe", .flags = 0, },
    [CWD] = { .name = "CWD", .title = "CWD                       ", .description = "The current working directory of the process", .flags = PROCESS_FLAG_CWD, },
+   [AUTOGROUP_ID] = { .name = "AUTOGROUP_ID", .title = "AGRP", .description = "The autogroup identifier of the process", .flags = PROCESS_FLAG_LINUX_AUTOGROUP, },
+   [AUTOGROUP_NICE] = { .name = "AUTOGROUP_NICE", .title = " ANI", .description = "Nice value (the higher the value, the more other processes take priority) associated with the process autogroup", .flags = PROCESS_FLAG_LINUX_AUTOGROUP, },
 };
 
 Process* LinuxProcess_new(const Settings* settings) {
@@ -112,6 +112,7 @@ Process* LinuxProcess_new(const Settings* settings) {
 void Process_delete(Object* cast) {
    LinuxProcess* this = (LinuxProcess*) cast;
    Process_done((Process*)cast);
+   free(this->cgroup_short);
    free(this->cgroup);
 #ifdef HAVE_OPENVZ
    free(this->ctid);
@@ -159,15 +160,36 @@ bool LinuxProcess_setIOPriority(Process* this, Arg ioprio) {
    return (LinuxProcess_updateIOPriority((LinuxProcess*)this) == ioprio.i);
 }
 
-#ifdef HAVE_DELAYACCT
-static void LinuxProcess_printDelay(float delay_percent, char* buffer, int n) {
-   if (isnan(delay_percent)) {
-      xSnprintf(buffer, n, " N/A  ");
-   } else {
-      xSnprintf(buffer, n, "%4.1f  ", delay_percent);
-   }
+bool LinuxProcess_isAutogroupEnabled(void) {
+   char buf[16];
+   if (xReadfile(PROCDIR "/sys/kernel/sched_autogroup_enabled", buf, sizeof(buf)) < 0)
+      return false;
+   return buf[0] == '1';
 }
-#endif
+
+bool LinuxProcess_changeAutogroupPriorityBy(Process* this, Arg delta) {
+   char buffer[256];
+   xSnprintf(buffer, sizeof(buffer), PROCDIR "/%d/autogroup", this->pid);
+
+   FILE* file = fopen(buffer, "r+");
+   if (!file)
+      return false;
+
+   long int identity;
+   int nice;
+   int ok = fscanf(file, "/autogroup-%ld nice %d", &identity, &nice);
+   bool success;
+   if (ok == 2) {
+      rewind(file);
+      xSnprintf(buffer, sizeof(buffer), "%d", nice + delta.i);
+      success = fputs(buffer, file) > 0;
+   } else {
+      success = false;
+   }
+
+   fclose(file);
+   return success;
+}
 
 static void LinuxProcess_writeField(const Process* this, RichString* str, ProcessField field) {
    const LinuxProcess* lp = (const LinuxProcess*) this;
@@ -179,7 +201,6 @@ static void LinuxProcess_writeField(const Process* this, RichString* str, Proces
    case CMINFLT: Process_printCount(str, lp->cminflt, coloring); return;
    case CMAJFLT: Process_printCount(str, lp->cmajflt, coloring); return;
    case M_DRS: Process_printBytes(str, lp->m_drs * pageSize, coloring); return;
-   case M_DT: Process_printBytes(str, lp->m_dt * pageSize, coloring); return;
    case M_LRS:
       if (lp->m_lrs) {
          Process_printBytes(str, lp->m_lrs * pageSize, coloring);
@@ -227,7 +248,8 @@ static void LinuxProcess_writeField(const Process* this, RichString* str, Proces
    #ifdef HAVE_VSERVER
    case VXID: xSnprintf(buffer, n, "%5u ", lp->vxid); break;
    #endif
-   case CGROUP: xSnprintf(buffer, n, "%-10s ", lp->cgroup ? lp->cgroup : ""); break;
+   case CGROUP: xSnprintf(buffer, n, "%-35.35s ", lp->cgroup ? lp->cgroup : "N/A"); break;
+   case CCGROUP: xSnprintf(buffer, n, "%-35.35s ", lp->cgroup_short ? lp->cgroup_short : (lp->cgroup ? lp->cgroup : "N/A")); break;
    case OOM: xSnprintf(buffer, n, "%4u ", lp->oom); break;
    case IO_PRIORITY: {
       int klass = IOPriority_class(lp->ioPriority);
@@ -248,9 +270,9 @@ static void LinuxProcess_writeField(const Process* this, RichString* str, Proces
       break;
    }
    #ifdef HAVE_DELAYACCT
-   case PERCENT_CPU_DELAY: LinuxProcess_printDelay(lp->cpu_delay_percent, buffer, n); break;
-   case PERCENT_IO_DELAY: LinuxProcess_printDelay(lp->blkio_delay_percent, buffer, n); break;
-   case PERCENT_SWAP_DELAY: LinuxProcess_printDelay(lp->swapin_delay_percent, buffer, n); break;
+   case PERCENT_CPU_DELAY: Process_printPercentage(lp->cpu_delay_percent, buffer, n, &attr); break;
+   case PERCENT_IO_DELAY: Process_printPercentage(lp->blkio_delay_percent, buffer, n, &attr); break;
+   case PERCENT_SWAP_DELAY: Process_printPercentage(lp->swapin_delay_percent, buffer, n, &attr); break;
    #endif
    case CTXT:
       if (lp->ctxt_diff > 1000) {
@@ -258,7 +280,26 @@ static void LinuxProcess_writeField(const Process* this, RichString* str, Proces
       }
       xSnprintf(buffer, n, "%5lu ", lp->ctxt_diff);
       break;
-   case SECATTR: snprintf(buffer, n, "%-30s   ", lp->secattr ? lp->secattr : "?"); break;
+   case SECATTR: snprintf(buffer, n, "%-30.30s ", lp->secattr ? lp->secattr : "?"); break;
+   case AUTOGROUP_ID:
+      if (lp->autogroup_id != -1) {
+         xSnprintf(buffer, n, "%4ld ", lp->autogroup_id);
+      } else {
+         attr = CRT_colors[PROCESS_SHADOW];
+         xSnprintf(buffer, n, " N/A ");
+      }
+      break;
+   case AUTOGROUP_NICE:
+      if (lp->autogroup_id != -1) {
+         xSnprintf(buffer, n, "%3d ", lp->autogroup_nice);
+         attr = lp->autogroup_nice < 0 ? CRT_colors[PROCESS_HIGH_PRIORITY]
+              : lp->autogroup_nice > 0 ? CRT_colors[PROCESS_LOW_PRIORITY]
+              : CRT_colors[PROCESS_SHADOW];
+      } else {
+         attr = CRT_colors[PROCESS_SHADOW];
+         xSnprintf(buffer, n, "N/A ");
+      }
+      break;
    default:
       Process_writeField(this, str, field);
       return;
@@ -280,8 +321,6 @@ static int LinuxProcess_compareByKey(const Process* v1, const Process* v2, Proce
    switch (key) {
    case M_DRS:
       return SPACESHIP_NUMBER(p1->m_drs, p2->m_drs);
-   case M_DT:
-      return SPACESHIP_NUMBER(p1->m_dt, p2->m_dt);
    case M_LRS:
       return SPACESHIP_NUMBER(p1->m_lrs, p2->m_lrs);
    case M_TRS:
@@ -334,6 +373,8 @@ static int LinuxProcess_compareByKey(const Process* v1, const Process* v2, Proce
    #endif
    case CGROUP:
       return SPACESHIP_NULLSTR(p1->cgroup, p2->cgroup);
+   case CCGROUP:
+      return SPACESHIP_NULLSTR(p1->cgroup_short, p2->cgroup_short);
    case OOM:
       return SPACESHIP_NUMBER(p1->oom, p2->oom);
    #ifdef HAVE_DELAYACCT
@@ -350,6 +391,10 @@ static int LinuxProcess_compareByKey(const Process* v1, const Process* v2, Proce
       return SPACESHIP_NUMBER(p1->ctxt_diff, p2->ctxt_diff);
    case SECATTR:
       return SPACESHIP_NULLSTR(p1->secattr, p2->secattr);
+   case AUTOGROUP_ID:
+      return SPACESHIP_NUMBER(p1->autogroup_id, p2->autogroup_id);
+   case AUTOGROUP_NICE:
+      return SPACESHIP_NUMBER(p1->autogroup_nice, p2->autogroup_nice);
    default:
       return Process_compareByKey_Base(v1, v2, key);
    }

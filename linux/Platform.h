@@ -3,9 +3,11 @@
 /*
 htop - linux/Platform.h
 (C) 2014 Hisham H. Muhammad
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
+
+#include "config.h"
 
 #include <limits.h>
 #include <stdbool.h>
@@ -17,11 +19,15 @@ in the source distribution for its full text.
 #include "Action.h"
 #include "BatteryMeter.h"
 #include "DiskIOMeter.h"
+#include "Hashtable.h"
+#include "Macros.h"
 #include "Meter.h"
 #include "NetworkIOMeter.h"
 #include "Process.h"
 #include "ProcessLocksScreen.h"
+#include "RichString.h"
 #include "SignalsPanel.h"
+#include "CommandLine.h"
 #include "generic/gettime.h"
 #include "generic/hostname.h"
 #include "generic/uname.h"
@@ -32,7 +38,9 @@ in the source distribution for its full text.
 #endif
 
 
-extern const ProcessField Platform_defaultFields[];
+extern const ScreenDefaults Platform_defaultScreens[];
+
+extern const unsigned int Platform_numberOfDefaultScreens;
 
 extern const SignalItem Platform_signals[];
 
@@ -40,8 +48,7 @@ extern const unsigned int Platform_numberOfSignals;
 
 extern const MeterClass* const Platform_meterTypes[];
 
-void Platform_init(void);
-
+bool Platform_init(void);
 void Platform_done(void);
 
 void Platform_setBindings(Htop_Action* keys);
@@ -95,7 +102,7 @@ static inline void Platform_getRelease(char** string) {
 
 void Platform_longOptionsUsage(const char* name);
 
-bool Platform_getLongOption(int opt, int argc, char** argv);
+CommandLineStatus Platform_getLongOption(int opt, int argc, char** argv);
 
 static inline void Platform_gettime_realtime(struct timeval* tv, uint64_t* msec) {
    Generic_gettime_realtime(tv, msec);
@@ -105,14 +112,22 @@ static inline void Platform_gettime_monotonic(uint64_t* msec) {
    Generic_gettime_monotonic(msec);
 }
 
-static inline Hashtable* Platform_dynamicMeters(void) {
-   return NULL;
-}
+static inline Hashtable* Platform_dynamicMeters(void) { return NULL; }
+
+static inline void Platform_dynamicMetersDone(ATTR_UNUSED Hashtable* table) { }
 
 static inline void Platform_dynamicMeterInit(ATTR_UNUSED Meter* meter) { }
 
 static inline void Platform_dynamicMeterUpdateValues(ATTR_UNUSED Meter* meter) { }
 
 static inline void Platform_dynamicMeterDisplay(ATTR_UNUSED const Meter* meter, ATTR_UNUSED RichString* out) { }
+
+static inline Hashtable* Platform_dynamicColumns(void) { return NULL; }
+
+static inline void Platform_dynamicColumnsDone(ATTR_UNUSED Hashtable* table) { }
+
+static inline const char* Platform_dynamicColumnInit(ATTR_UNUSED unsigned int key) { return NULL; }
+
+static inline bool Platform_dynamicColumnWriteField(ATTR_UNUSED const Process* proc, ATTR_UNUSED RichString* str, ATTR_UNUSED unsigned int key) { return false; }
 
 #endif

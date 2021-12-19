@@ -3,7 +3,7 @@
 /*
 htop - Meter.h
 (C) 2004-2011 Hisham H. Muhammad
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -73,6 +73,7 @@ typedef struct MeterClass_ {
    const char* const caption;              /* prefix in the actual header */
    const char* const description;          /* optional meter description in header setup menu */
    const uint8_t maxItems;
+   const bool isMultiColumn;               /* whether the meter draws multiple sub-columns (defaults to false) */
 } MeterClass;
 
 #define As_Meter(this_)                ((const MeterClass*)((this_)->super.klass))
@@ -92,6 +93,7 @@ typedef struct MeterClass_ {
 #define Meter_attributes(this_)        As_Meter(this_)->attributes
 #define Meter_name(this_)              As_Meter(this_)->name
 #define Meter_uiName(this_)            As_Meter(this_)->uiName
+#define Meter_isMultiColumn(this_)     As_Meter(this_)->isMultiColumn
 
 typedef struct GraphData_ {
    struct timeval time;
@@ -107,7 +109,7 @@ struct Meter_ {
    unsigned int param;
    GraphData* drawData;
    int h;
-   int columnWidthCount;      /*<< only used internally by the Header */
+   int columnWidthCount;      /**< only used internally by the Header */
    const ProcessList* pl;
    uint8_t curItems;
    const int* curAttributes;
@@ -131,6 +133,13 @@ typedef enum {
    LED_METERMODE,
    LAST_METERMODE
 } MeterModeId;
+
+typedef enum {
+   RATESTATUS_DATA,
+   RATESTATUS_INIT,
+   RATESTATUS_NODATA,
+   RATESTATUS_STALE
+} MeterRateStatus;
 
 extern const MeterClass Meter_class;
 

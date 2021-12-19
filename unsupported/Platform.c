@@ -2,7 +2,7 @@
 htop - unsupported/Platform.c
 (C) 2014 Hisham H. Muhammad
 (C) 2015 David C. Hunt
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -20,19 +20,28 @@ in the source distribution for its full text.
 #include "LoadAverageMeter.h"
 #include "Macros.h"
 #include "MemoryMeter.h"
+#include "MemorySwapMeter.h"
 #include "SwapMeter.h"
 #include "SysArchMeter.h"
 #include "TasksMeter.h"
 #include "UptimeMeter.h"
 
 
+const ScreenDefaults Platform_defaultScreens[] = {
+   {
+      .name = "Main",
+      .columns = "PID USER PRIORITY NICE M_VIRT M_RESIDENT STATE PERCENT_CPU PERCENT_MEM TIME Command",
+      .sortKey = "PERCENT_CPU",
+   },
+};
+
+const unsigned int Platform_numberOfDefaultScreens = ARRAYSIZE(Platform_defaultScreens);
+
 const SignalItem Platform_signals[] = {
    { .name = " 0 Cancel",    .number =  0 },
 };
 
 const unsigned int Platform_numberOfSignals = ARRAYSIZE(Platform_signals);
-
-const ProcessField Platform_defaultFields[] = { PID, USER, PRIORITY, NICE, M_VIRT, M_RESIDENT, STATE, PERCENT_CPU, PERCENT_MEM, TIME, COMM, 0 };
 
 const MeterClass* const Platform_meterTypes[] = {
    &CPUMeter_class,
@@ -43,6 +52,7 @@ const MeterClass* const Platform_meterTypes[] = {
    &LoadMeter_class,
    &MemoryMeter_class,
    &SwapMeter_class,
+   &MemorySwapMeter_class,
    &TasksMeter_class,
    &BatteryMeter_class,
    &HostnameMeter_class,
@@ -66,8 +76,9 @@ const MeterClass* const Platform_meterTypes[] = {
 
 static const char Platform_unsupported[] = "unsupported";
 
-void Platform_init(void) {
+bool Platform_init(void) {
    /* no platform-specific setup needed */
+   return true;
 }
 
 void Platform_done(void) {
@@ -111,11 +122,6 @@ void Platform_setMemoryValues(Meter* this) {
 
 void Platform_setSwapValues(Meter* this) {
    (void) this;
-}
-
-bool Process_isThread(const Process* this) {
-   (void) this;
-   return false;
 }
 
 char* Platform_getProcessEnv(pid_t pid) {

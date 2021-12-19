@@ -1,7 +1,7 @@
 /*
 htop - generic/gettime.c
 (C) 2021 htop dev team
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 #include "config.h"  // IWYU pragma: keep
@@ -49,9 +49,13 @@ void Generic_gettime_monotonic(uint64_t* msec) {
    else
       *msec = 0;
 
-#else
+#else /* lower resolution gettimeofday() should be always available */
 
-# error "No monotonic clock available"
+   struct timeval tv;
+   if (gettimeofday(&tv, NULL) == 0)
+      *msec = ((uint64_t)tv.tv_sec * 1000) + ((uint64_t)tv.tv_usec / 1000);
+   else
+      *msec = 0;
 
 #endif
 }

@@ -1,14 +1,13 @@
 /*
 htop - RichString.c
 (C) 2004,2011 Hisham H. Muhammad
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
 #include "RichString.h"
 
 #include <ctype.h>
-#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 

@@ -1,7 +1,7 @@
 /*
 htop - StringUtils.c
 (C) 2004-2011 Hisham H. Muhammad
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -76,6 +76,26 @@ void* xReallocArray(void* ptr, size_t nmemb, size_t size) {
       fail();
    }
    return xRealloc(ptr, nmemb * size);
+}
+
+void* xReallocArrayZero(void* ptr, size_t prevmemb, size_t newmemb, size_t size) {
+   assert((ptr == NULL) == (prevmemb == 0));
+
+   if (prevmemb == newmemb) {
+      return ptr;
+   }
+
+   void* ret = xReallocArray(ptr, newmemb, size);
+
+   if (newmemb > prevmemb) {
+      memset((unsigned char*)ret + prevmemb * size, '\0', (newmemb - prevmemb) * size);
+   }
+
+   return ret;
+}
+
+inline bool String_contains_i(const char* s1, const char* s2) {
+   return strcasestr(s1, s2) != NULL;
 }
 
 char* String_cat(const char* s1, const char* s2) {

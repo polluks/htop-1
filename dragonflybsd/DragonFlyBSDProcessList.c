@@ -2,7 +2,7 @@
 htop - DragonFlyBSDProcessList.c
 (C) 2014 Hisham H. Muhammad
 (C) 2017 Diederik de Groot
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -42,12 +42,12 @@ static int MIB_kern_cp_time[2];
 static int MIB_kern_cp_times[2];
 static int kernelFScale;
 
-ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* dynamicMeters, Hashtable* pidMatchList, uid_t userId) {
+ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* dynamicMeters, Hashtable* dynamicColumns, Hashtable* pidMatchList, uid_t userId) {
    size_t len;
    char errbuf[_POSIX2_LINE_MAX];
    DragonFlyBSDProcessList* dfpl = xCalloc(1, sizeof(DragonFlyBSDProcessList));
    ProcessList* pl = (ProcessList*) dfpl;
-   ProcessList_init(pl, Class(DragonFlyBSDProcess), usersTable, dynamicMeters, pidMatchList, userId);
+   ProcessList_init(pl, Class(DragonFlyBSDProcess), usersTable, dynamicMeters, dynamicColumns, pidMatchList, userId);
 
    // physical memory in system: hw.physmem
    // physical page size: hw.pagesize
@@ -79,8 +79,8 @@ ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* dynamicMeters, H
 
    size_t sizeof_cp_time_array = sizeof(unsigned long) * CPUSTATES;
    len = 2; sysctlnametomib("kern.cp_time", MIB_kern_cp_time, &len);
-   dfpl->cp_time_o = xCalloc(cpus, sizeof_cp_time_array);
-   dfpl->cp_time_n = xCalloc(cpus, sizeof_cp_time_array);
+   dfpl->cp_time_o = xCalloc(CPUSTATES, sizeof(unsigned long));
+   dfpl->cp_time_n = xCalloc(CPUSTATES, sizeof(unsigned long));
    len = sizeof_cp_time_array;
 
    // fetch initial single (or average) CPU clicks from kernel
@@ -95,13 +95,15 @@ ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* dynamicMeters, H
       sysctl(MIB_kern_cp_times, 2, dfpl->cp_times_o, &len, NULL, 0);
    }
 
-   pl->cpuCount = MAXIMUM(cpus, 1);
+   pl->existingCPUs = MAXIMUM(cpus, 1);
+   // TODO: support offline CPUs and hot swapping
+   pl->activeCPUs = pl->existingCPUs;
 
    if (cpus == 1 ) {
       dfpl->cpus = xRealloc(dfpl->cpus, sizeof(CPUData));
    } else {
       // on smp we need CPUs + 1 to store averages too (as kernel kindly provides that as well)
-      dfpl->cpus = xRealloc(dfpl->cpus, (pl->cpuCount + 1) * sizeof(CPUData));
+      dfpl->cpus = xRealloc(dfpl->cpus, (pl->existingCPUs + 1) * sizeof(CPUData));
    }
 
    len = sizeof(kernelFScale);
@@ -140,8 +142,8 @@ void ProcessList_delete(ProcessList* this) {
 static inline void DragonFlyBSDProcessList_scanCPUTime(ProcessList* pl) {
    const DragonFlyBSDProcessList* dfpl = (DragonFlyBSDProcessList*) pl;
 
-   unsigned int cpus   = pl->cpuCount;   // actual CPU count
-   unsigned int maxcpu = cpus;           // max iteration (in case we have average + smp)
+   unsigned int cpus   = pl->existingCPUs;  // actual CPU count
+   unsigned int maxcpu = cpus;              // max iteration (in case we have average + smp)
    int cp_times_offset;
 
    assert(cpus > 0);
@@ -331,6 +333,7 @@ static void DragonFlyBSDProcessList_updateProcessName(kvm_t* kd, const struct ki
    }
 
    char* cmdline = xMalloc(len);
+
    char* at = cmdline;
    int end = 0;
    for (int i = 0; argv[i]; i++) {
@@ -344,6 +347,8 @@ static void DragonFlyBSDProcessList_updateProcessName(kvm_t* kd, const struct ki
    *at = '\0';
 
    Process_updateCmdline(proc, cmdline, 0, end);
+
+   free(cmdline);
 }
 
 static inline void DragonFlyBSDProcessList_scanJails(DragonFlyBSDProcessList* dfpl) {
@@ -430,7 +435,6 @@ void ProcessList_goThroughEntries(ProcessList* super, bool pauseProcessUpdate) {
 
    int count = 0;
 
-   // TODO Kernel Threads seem to be skipped, need to figure out the correct flag
    const struct kinfo_proc* kprocs = kvm_getprocs(dfpl->kd, KERN_PROC_ALL | (!hideUserlandThreads ? KERN_PROC_FLAG_LWP : 0), 0, &count);
 
    for (int i = 0; i < count; i++) {
@@ -441,8 +445,6 @@ void ProcessList_goThroughEntries(ProcessList* super, bool pauseProcessUpdate) {
       // note: dragonflybsd kernel processes all have the same pid, so we misuse the kernel thread address to give them a unique identifier
       Process* proc = ProcessList_getProcess(super, kproc->kp_ktaddr ? (pid_t)kproc->kp_ktaddr : kproc->kp_pid, &preExisting, DragonFlyBSDProcess_new);
       DragonFlyBSDProcess* dfp = (DragonFlyBSDProcess*) proc;
-
-      proc->show = ! ((hideKernelThreads && Process_isKernelThread(proc)) || (hideUserlandThreads && Process_isUserlandThread(proc)));
 
       if (!preExisting) {
          dfp->jid = kproc->kp_jailid;
@@ -479,7 +481,7 @@ void ProcessList_goThroughEntries(ProcessList* super, bool pauseProcessUpdate) {
          DragonFlyBSDProcessList_updateExe(kproc, proc);
          DragonFlyBSDProcessList_updateProcessName(dfpl->kd, kproc, proc);
 
-         if (settings->flags & PROCESS_FLAG_CWD) {
+         if (settings->ss->flags & PROCESS_FLAG_CWD) {
             DragonFlyBSDProcessList_updateCwd(kproc, proc);
          }
 
@@ -540,62 +542,73 @@ void ProcessList_goThroughEntries(ProcessList* super, bool pauseProcessUpdate) {
       }
 
       // would be nice if we could store multiple states in proc->state (as enum) and have writeField render them
+      /* Taken from: https://github.com/DragonFlyBSD/DragonFlyBSD/blob/c163a4d7ee9c6857ee4e04a3a2cbb50c3de29da1/sys/sys/proc_common.h */
       switch (kproc->kp_stat) {
-      case SIDL:   proc->state = 'I'; isIdleProcess = true; break;
+      case SIDL:   proc->state = IDLE; isIdleProcess = true; break;
       case SACTIVE:
          switch (kproc->kp_lwp.kl_stat) {
             case LSSLEEP:
                if (kproc->kp_lwp.kl_flags & LWP_SINTR)					// interruptible wait short/long
                   if (kproc->kp_lwp.kl_slptime >= MAXSLP) {
-                     proc->state = 'I';
+                     proc->state = IDLE;
                      isIdleProcess = true;
                   } else {
-                     proc->state = 'S';
+                     proc->state = SLEEPING;
                   }
                else if (kproc->kp_lwp.kl_tdflags & TDF_SINTR)				// interruptible lwkt wait
-                  proc->state = 'S';
+                  proc->state = SLEEPING;
                else if (kproc->kp_paddr)						// uninterruptible wait
-                  proc->state = 'D';
+                  proc->state = UNINTERRUPTIBLE_WAIT;
                else									// uninterruptible lwkt wait
-                  proc->state = 'B';
+                  proc->state = UNINTERRUPTIBLE_WAIT;
                break;
             case LSRUN:
                if (kproc->kp_lwp.kl_stat == LSRUN) {
                   if (!(kproc->kp_lwp.kl_tdflags & (TDF_RUNNING | TDF_RUNQ)))
-                     proc->state = 'Q';
+                     proc->state = QUEUED;
                   else
-                     proc->state = 'R';
+                     proc->state = RUNNING;
                }
                break;
             case LSSTOP:
-               proc->state = 'T';
+               proc->state = STOPPED;
                break;
             default:
-               proc->state = 'A';
+               proc->state = PAGING;
                break;
          }
          break;
-      case SSTOP:  proc->state = 'T'; break;
-      case SZOMB:  proc->state = 'Z'; break;
-      case SCORE:  proc->state = 'C'; break;
-      default:     proc->state = '?';
+      case SSTOP:  proc->state = STOPPED; break;
+      case SZOMB:  proc->state = ZOMBIE; break;
+      case SCORE:  proc->state = BLOCKED; break;
+      default:     proc->state = UNKNOWN;
       }
 
       if (kproc->kp_flags & P_SWAPPEDOUT)
-         proc->state = 'W';
+         proc->state = SLEEPING;
       if (kproc->kp_flags & P_TRACED)
-         proc->state = 'T';
+         proc->state = TRACED;
       if (kproc->kp_flags & P_JAILED)
-         proc->state = 'J';
+         proc->state = TRACED;
 
       if (Process_isKernelThread(proc))
          super->kernelThreads++;
 
       super->totalTasks++;
 
-      if (proc->state == 'R')
+      if (proc->state == RUNNING)
          super->runningTasks++;
 
+      proc->show = ! ((hideKernelThreads && Process_isKernelThread(proc)) || (hideUserlandThreads && Process_isUserlandThread(proc)));
       proc->updated = true;
    }
+}
+
+bool ProcessList_isCPUonline(const ProcessList* super, unsigned int id) {
+   assert(id < super->existingCPUs);
+
+   // TODO: support offline CPUs and hot swapping
+   (void) super; (void) id;
+
+   return true;
 }

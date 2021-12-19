@@ -1,7 +1,7 @@
 /*
 htop - Action.c
 (C) 2015 Hisham H. Muhammad
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -13,9 +13,10 @@ in the source distribution for its full text.
 #include <stdbool.h>
 #include <stdlib.h>
 
+#include "CRT.h"
 #include "CategoriesPanel.h"
 #include "CommandScreen.h"
-#include "CRT.h"
+#include "DynamicColumn.h"
 #include "EnvScreen.h"
 #include "FunctionBar.h"
 #include "Hashtable.h"
@@ -34,7 +35,7 @@ in the source distribution for its full text.
 #include "Vector.h"
 #include "XUtils.h"
 
-#if (defined(HAVE_LIBHWLOC) || defined(HAVE_LINUX_AFFINITY))
+#if (defined(HAVE_LIBHWLOC) || defined(HAVE_AFFINITY))
 #include "Affinity.h"
 #include "AffinityPanel.h"
 #endif
@@ -47,7 +48,7 @@ Object* Action_pickFromVector(State* st, Panel* list, int x, bool followProcess)
    int y = ((Panel*)mainPanel)->y;
    ScreenManager* scr = ScreenManager_new(header, st->settings, st, false);
    scr->allowFocusChange = false;
-   ScreenManager_add(scr, list, x - 1);
+   ScreenManager_add(scr, list, x);
    ScreenManager_add(scr, (Panel*)mainPanel, -1);
    Panel* panelFocus;
    int ch;
@@ -57,7 +58,7 @@ Object* Action_pickFromVector(State* st, Panel* list, int x, bool followProcess)
       header->pl->following = pid;
       unfollow = true;
    }
-   ScreenManager_run(scr, &panelFocus, &ch);
+   ScreenManager_run(scr, &panelFocus, &ch, NULL);
    if (unfollow) {
       header->pl->following = -1;
    }
@@ -83,12 +84,8 @@ Object* Action_pickFromVector(State* st, Panel* list, int x, bool followProcess)
 
 static void Action_runSetup(State* st) {
    ScreenManager* scr = ScreenManager_new(st->header, st->settings, st, true);
-   CategoriesPanel* panelCategories = CategoriesPanel_new(scr, st->settings, st->header, st->pl);
-   ScreenManager_add(scr, (Panel*) panelCategories, 16);
-   CategoriesPanel_makeMetersPage(panelCategories);
-   Panel* panelFocus;
-   int ch;
-   ScreenManager_run(scr, &panelFocus, &ch);
+   CategoriesPanel_new(scr, st->settings, st->header, st->pl);
+   ScreenManager_run(scr, NULL, NULL, "Setup");
    ScreenManager_delete(scr);
    if (st->settings->changed) {
       Header_writeBackToSettings(st->header);
@@ -157,7 +154,7 @@ static bool collapseIntoParent(Panel* panel) {
 }
 
 Htop_Reaction Action_setSortKey(Settings* settings, ProcessField sortKey) {
-   Settings_setSortKey(settings, sortKey);
+   ScreenSettings_setSortKey(settings->ss, sortKey);
    return HTOP_REFRESH | HTOP_SAVE_SETTINGS | HTOP_UPDATE_PANELHDR | HTOP_KEEP_FOLLOWING;
 }
 
@@ -167,16 +164,26 @@ static Htop_Reaction actionSetSortColumn(State* st) {
    Htop_Reaction reaction = HTOP_OK;
    Panel* sortPanel = Panel_new(0, 0, 0, 0, Class(ListItem), true, FunctionBar_newEnterEsc("Sort   ", "Cancel "));
    Panel_setHeader(sortPanel, "Sort by");
-   const ProcessField* fields = st->settings->fields;
+   const Settings* settings = st->settings;
+   const ProcessField* fields = settings->ss->fields;
+   Hashtable* dynamicColumns = settings->dynamicColumns;
    for (int i = 0; fields[i]; i++) {
-      char* name = String_trim(Process_fields[fields[i]].name);
+      char* name = NULL;
+      if (fields[i] >= LAST_PROCESSFIELD) {
+         DynamicColumn* column = Hashtable_get(dynamicColumns, fields[i]);
+         if (!column)
+            continue;
+         name = xStrdup(column->caption ? column->caption : column->name);
+      } else {
+         name = String_trim(Process_fields[fields[i]].name);
+      }
       Panel_add(sortPanel, (Object*) ListItem_new(name, fields[i]));
-      if (fields[i] == Settings_getActiveSortKey(st->settings))
+      if (fields[i] == ScreenSettings_getActiveSortKey(settings->ss))
          Panel_setSelected(sortPanel, i);
 
       free(name);
    }
-   const ListItem* field = (const ListItem*) Action_pickFromVector(st, sortPanel, 15, false);
+   const ListItem* field = (const ListItem*) Action_pickFromVector(st, sortPanel, 14, false);
    if (field) {
       reaction |= Action_setSortKey(st->settings, field->key);
    }
@@ -225,16 +232,18 @@ static Htop_Reaction actionToggleMergedCommand(State* st) {
 }
 
 static Htop_Reaction actionToggleTreeView(State* st) {
-   st->settings->treeView = !st->settings->treeView;
+   ScreenSettings* ss = st->settings->ss;
+   ss->treeView = !ss->treeView;
 
-   if (!st->settings->allBranchesCollapsed)
+   if (!ss->allBranchesCollapsed)
       ProcessList_expandTree(st->pl);
    return HTOP_REFRESH | HTOP_SAVE_SETTINGS | HTOP_KEEP_FOLLOWING | HTOP_REDRAW_BAR | HTOP_UPDATE_PANELHDR;
 }
 
 static Htop_Reaction actionExpandOrCollapseAllBranches(State* st) {
-   st->settings->allBranchesCollapsed = !st->settings->allBranchesCollapsed;
-   if (st->settings->allBranchesCollapsed)
+   ScreenSettings* ss = st->settings->ss;
+   ss->allBranchesCollapsed = !ss->allBranchesCollapsed;
+   if (ss->allBranchesCollapsed)
       ProcessList_collapseAllBranches(st->pl);
    else
       ProcessList_expandTree(st->pl);
@@ -271,7 +280,7 @@ static Htop_Reaction actionLowerPriority(State* st) {
 }
 
 static Htop_Reaction actionInvertSortOrder(State* st) {
-   Settings_invertSortOrder(st->settings);
+   ScreenSettings_invertSortOrder(st->settings->ss);
    if (st->pauseProcessUpdate)
       ProcessList_sort(st->pl);
    return HTOP_REFRESH | HTOP_SAVE_SETTINGS | HTOP_KEEP_FOLLOWING;
@@ -283,7 +292,7 @@ static Htop_Reaction actionExpandOrCollapse(State* st) {
 }
 
 static Htop_Reaction actionCollapseIntoParent(State* st) {
-   if (!st->settings->treeView) {
+   if (!st->settings->ss->treeView) {
       return HTOP_OK;
    }
    bool changed = collapseIntoParent((Panel*)st->mainPanel);
@@ -291,7 +300,46 @@ static Htop_Reaction actionCollapseIntoParent(State* st) {
 }
 
 static Htop_Reaction actionExpandCollapseOrSortColumn(State* st) {
-   return st->settings->treeView ? actionExpandOrCollapse(st) : actionSetSortColumn(st);
+   return st->settings->ss->treeView ? actionExpandOrCollapse(st) : actionSetSortColumn(st);
+}
+
+static Htop_Reaction actionNextScreen(State* st) {
+   Settings* settings = st->settings;
+   settings->ssIndex++;
+   if (settings->ssIndex == settings->nScreens) {
+      settings->ssIndex = 0;
+   }
+   settings->ss = settings->screens[settings->ssIndex];
+   return HTOP_REFRESH;
+}
+
+static Htop_Reaction actionPrevScreen(State* st) {
+   Settings* settings = st->settings;
+   if (settings->ssIndex == 0) {
+      settings->ssIndex = settings->nScreens - 1;
+   } else {
+      settings->ssIndex--;
+   }
+   settings->ss = settings->screens[settings->ssIndex];
+   return HTOP_REFRESH;
+}
+
+Htop_Reaction Action_setScreenTab(Settings* settings, int x) {
+   int s = 2;
+   for (unsigned int i = 0; i < settings->nScreens; i++) {
+      if (x < s) {
+         return 0;
+      }
+      const char* name = settings->screens[i]->name;
+      int len = strlen(name);
+      if (x <= s + len + 1) {
+         settings->ssIndex = i;
+         settings->ss = settings->screens[i];
+         return HTOP_REFRESH;
+      }
+      s += len + 3;
+   }
+   return 0;
 }
 
 static Htop_Reaction actionQuit(ATTR_UNUSED State* st) {
@@ -302,10 +350,10 @@ static Htop_Reaction actionSetAffinity(State* st) {
    if (Settings_isReadonly())
       return HTOP_OK;
 
-   if (st->pl->cpuCount == 1)
+   if (st->pl->activeCPUs == 1)
       return HTOP_OK;
 
-#if (defined(HAVE_LIBHWLOC) || defined(HAVE_LINUX_AFFINITY))
+#if (defined(HAVE_LIBHWLOC) || defined(HAVE_AFFINITY))
    const Process* p = (const Process*) Panel_getSelected((Panel*)st->mainPanel);
    if (!p)
       return HTOP_OK;
@@ -316,7 +364,6 @@ static Htop_Reaction actionSetAffinity(State* st) {
 
    int width;
    Panel* affinityPanel = AffinityPanel_new(st->pl, affinity1, &width);
-   width += 1; /* we add a gap between the panels */
    Affinity_delete(affinity1);
 
    const void* set = Action_pickFromVector(st, affinityPanel, width, true);
@@ -328,17 +375,23 @@ static Htop_Reaction actionSetAffinity(State* st) {
       Affinity_delete(affinity2);
    }
    Object_delete(affinityPanel);
-#endif
    return HTOP_REFRESH | HTOP_REDRAW_BAR | HTOP_UPDATE_PANELHDR;
+#else
+   return HTOP_OK;
+#endif
+
 }
 
 static Htop_Reaction actionKill(State* st) {
    if (Settings_isReadonly())
       return HTOP_OK;
 
-   Panel* signalsPanel = SignalsPanel_new();
-   const ListItem* sgn = (ListItem*) Action_pickFromVector(st, signalsPanel, 15, true);
+   static int preSelectedSignal = SIGNALSPANEL_INITSELECTEDSIGNAL;
+
+   Panel* signalsPanel = SignalsPanel_new(preSelectedSignal);
+   const ListItem* sgn = (ListItem*) Action_pickFromVector(st, signalsPanel, 14, true);
    if (sgn && sgn->key != 0) {
+      preSelectedSignal = sgn->key;
       Panel_setHeader((Panel*)st->mainPanel, "Sending...");
       Panel_draw((Panel*)st->mainPanel, false, true, true, State_hideFunctionBar(st));
       refresh();
@@ -356,7 +409,7 @@ static Htop_Reaction actionFilterByUser(State* st) {
    Vector_insertionSort(usersPanel->items);
    ListItem* allUsers = ListItem_new("All users", -1);
    Panel_insert(usersPanel, 0, (Object*) allUsers);
-   const ListItem* picked = (ListItem*) Action_pickFromVector(st, usersPanel, 20, false);
+   const ListItem* picked = (ListItem*) Action_pickFromVector(st, usersPanel, 19, false);
    if (picked) {
       if (picked == allUsers) {
          st->pl->userId = (uid_t)-1;
@@ -376,10 +429,7 @@ Htop_Reaction Action_follow(State* st) {
 
 static Htop_Reaction actionSetup(State* st) {
    Action_runSetup(st);
-   int headerHeight = Header_calculateHeight(st->header);
-   Panel_move((Panel*)st->mainPanel, 0, headerHeight);
-   Panel_resize((Panel*)st->mainPanel, COLS, LINES - headerHeight - 1);
-   return HTOP_REFRESH | HTOP_REDRAW_BAR | HTOP_UPDATE_PANELHDR;
+   return HTOP_REFRESH | HTOP_REDRAW_BAR | HTOP_UPDATE_PANELHDR | HTOP_RESIZE;
 }
 
 static Htop_Reaction actionLsof(State* st) {
@@ -484,7 +534,7 @@ static const struct {
    { .key = "   F9 k: ", .roInactive = true,  .info = "kill process/tagged processes" },
    { .key = "   F7 ]: ", .roInactive = true,  .info = "higher priority (root only)" },
    { .key = "   F8 [: ", .roInactive = false, .info = "lower priority (+ nice)" },
-#if (defined(HAVE_LIBHWLOC) || defined(HAVE_LINUX_AFFINITY))
+#if (defined(HAVE_LIBHWLOC) || defined(HAVE_AFFINITY))
    { .key = "      a: ", .roInactive = true, .info = "set CPU affinity" },
 #endif
    { .key = "      e: ", .roInactive = false, .info = "show process environment" },
@@ -514,7 +564,7 @@ static Htop_Reaction actionHelp(State* st) {
    int line = 0;
 
    mvaddstr(line++, 0, "htop " VERSION " - " COPYRIGHT);
-   mvaddstr(line++, 0, "Released under the GNU GPLv2. See 'man' page for more info.");
+   mvaddstr(line++, 0, "Released under the GNU GPLv2+. See 'man' page for more info.");
 
    attrset(CRT_colors[DEFAULT_COLOR]);
    line++;
@@ -535,8 +585,8 @@ static Htop_Reaction actionHelp(State* st) {
       addattrstr(CRT_colors[CPU_NICE_TEXT], "low-priority"); addstr("/");
       addattrstr(CRT_colors[CPU_NORMAL], "normal"); addstr("/");
       addattrstr(CRT_colors[CPU_SYSTEM], "kernel"); addstr("/");
-      addattrstr(CRT_colors[CPU_GUEST], "virtualiz");
-      addattrstr(CRT_colors[BAR_SHADOW], "               used%");
+      addattrstr(CRT_colors[CPU_GUEST], "virtualized");
+      addattrstr(CRT_colors[BAR_SHADOW], "             used%");
    }
    addattrstr(CRT_colors[BAR_BORDER], "]");
    attrset(CRT_colors[DEFAULT_COLOR]);
@@ -706,4 +756,6 @@ void Action_setBindings(Htop_Action* keys) {
    keys[KEY_F(10)] = actionQuit;
    keys[KEY_F(18)] = actionExpandCollapseOrSortColumn;
    keys[KEY_RECLICK] = actionExpandOrCollapse;
+   keys[KEY_SHIFT_TAB] = actionPrevScreen;
+   keys['\t'] = actionNextScreen;
 }

@@ -4,13 +4,14 @@ htop - NetBSDProcessList.c
 (C) 2015 Michael McConville
 (C) 2021 Santhosh Raju
 (C) 2021 htop dev team
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
 #include "netbsd/NetBSDProcessList.h"
 
 #include <kvm.h>
+#include <math.h>
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,23 +39,83 @@ static long fscale;
 static int pageSize;
 static int pageSizeKB;
 
-ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* dynamicMeters, Hashtable* pidMatchList, uid_t userId) {
-   const int mib[] = { CTL_HW, HW_NCPU };
-   const int fmib[] = { CTL_KERN, KERN_FSCALE };
+static const struct {
+   const char* name;
+   long int scale;
+} freqSysctls[] = {
+   { "machdep.est.frequency.current",            1 },
+   { "machdep.powernow.frequency.current",       1 },
+   { "machdep.intrepid.frequency.current",       1 },
+   { "machdep.loongson.frequency.current",       1 },
+   { "machdep.cpu.frequency.current",            1 },
+   { "machdep.frequency.current",                1 },
+   { "machdep.tsc_freq",                   1000000 },
+};
+
+static void NetBSDProcessList_updateCPUcount(ProcessList* super) {
+   NetBSDProcessList* opl = (NetBSDProcessList*) super;
+
+   // Definitions for sysctl(3), cf. https://nxr.netbsd.org/xref/src/sys/sys/sysctl.h#813
+   const int mib_ncpu_existing[] = { CTL_HW, HW_NCPU }; // Number of existing CPUs
+   const int mib_ncpu_online[] = { CTL_HW, HW_NCPUONLINE }; // Number of online/active CPUs
+
    int r;
+   unsigned int value;
+   size_t size;
+
+   bool change = false;
+
+   // Query the number of active/online CPUs.
+   size = sizeof(value);
+   r = sysctl(mib_ncpu_online, 2, &value, &size, NULL, 0);
+   if (r < 0 || value < 1) {
+      value = 1;
+   }
+
+   if (value != super->activeCPUs) {
+      super->activeCPUs = value;
+      change = true;
+   }
+
+   // Query the total number of CPUs.
+   size = sizeof(value);
+   r = sysctl(mib_ncpu_existing, 2, &value, &size, NULL, 0);
+   if (r < 0 || value < 1) {
+      value = super->activeCPUs;
+   }
+
+   if (value != super->existingCPUs) {
+      opl->cpuData = xReallocArray(opl->cpuData, value + 1, sizeof(CPUData));
+      super->existingCPUs = value;
+      change = true;
+   }
+
+   // Reset CPU stats when number of online/existing CPU cores changed
+   if (change) {
+      CPUData* dAvg = &opl->cpuData[0];
+      memset(dAvg, '\0', sizeof(CPUData));
+      dAvg->totalTime = 1;
+      dAvg->totalPeriod = 1;
+
+      for (unsigned int i = 0; i < super->existingCPUs; i++) {
+         CPUData* d = &opl->cpuData[i + 1];
+         memset(d, '\0', sizeof(CPUData));
+         d->totalTime = 1;
+         d->totalPeriod = 1;
+      }
+   }
+}
+
+ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* dynamicMeters, Hashtable* dynamicColumns, Hashtable* pidMatchList, uid_t userId) {
+   const int fmib[] = { CTL_KERN, KERN_FSCALE };
    size_t size;
    char errbuf[_POSIX2_LINE_MAX];
 
    NetBSDProcessList* npl = xCalloc(1, sizeof(NetBSDProcessList));
    ProcessList* pl = (ProcessList*) npl;
-   ProcessList_init(pl, Class(NetBSDProcess), usersTable, dynamicMeters, pidMatchList, userId);
+   ProcessList_init(pl, Class(NetBSDProcess), usersTable, dynamicMeters, dynamicColumns, pidMatchList, userId);
 
-   size = sizeof(pl->cpuCount);
-   r = sysctl(mib, 2, &pl->cpuCount, &size, NULL, 0);
-   if (r < 0 || pl->cpuCount < 1) {
-      pl->cpuCount = 1;
-   }
-   npl->cpus = xCalloc(pl->cpuCount + 1, sizeof(CPUData));
+   NetBSDProcessList_updateCPUcount(pl);
 
    size = sizeof(fscale);
    if (sysctl(fmib, 2, &fscale, &size, NULL, 0) < 0) {
@@ -64,12 +125,6 @@ ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* dynamicMeters, H
    if ((pageSize = sysconf(_SC_PAGESIZE)) == -1)
       CRT_fatalError("pagesize sysconf call failed");
    pageSizeKB = pageSize / ONE_K;
-
-   for (unsigned int i = 0; i <= pl->cpuCount; i++) {
-      CPUData* d = npl->cpus + i;
-      d->totalTime = 1;
-      d->totalPeriod = 1;
-   }
 
    npl->kd = kvm_openfiles(NULL, NULL, NULL, KVM_NO_FILES, errbuf);
    if (npl->kd == NULL) {
@@ -86,7 +141,7 @@ void ProcessList_delete(ProcessList* this) {
       kvm_close(npl->kd);
    }
 
-   free(npl->cpus);
+   free(npl->cpuData);
 
    ProcessList_done(this);
    free(this);
@@ -192,6 +247,8 @@ static void NetBSDProcessList_updateProcessName(kvm_t* kd, const struct kinfo_pr
    }
 
    Process_updateCmdline(proc, s, start, end);
+
+   free(s);
 }
 
 /*
@@ -209,7 +266,6 @@ static void NetBSDProcessList_scanProcs(NetBSDProcessList* this) {
    bool hideKernelThreads = settings->hideKernelThreads;
    bool hideUserlandThreads = settings->hideUserlandThreads;
    int count = 0;
-   int nlwps = 0;
 
    const struct kinfo_proc2* kprocs = kvm_getproc2(this->kd, KERN_PROC_ALL, 0, sizeof(struct kinfo_proc2), &count);
 
@@ -227,13 +283,21 @@ static void NetBSDProcessList_scanProcs(NetBSDProcessList* this) {
          proc->tpgid = kproc->p_tpgid;
          proc->tgid = kproc->p_pid;
          proc->session = kproc->p_sid;
-         proc->tty_nr = kproc->p_tdev;
          proc->pgrp = kproc->p__pgid;
-         proc->isKernelThread = proc->pgrp == 0;
+         proc->isKernelThread = !!(kproc->p_flag & P_SYSTEM);
          proc->isUserlandThread = proc->pid != proc->tgid;
          proc->starttime_ctime = kproc->p_ustart_sec;
          Process_fillStarttimeBuffer(proc);
          ProcessList_add(&this->super, proc);
+
+         proc->tty_nr = kproc->p_tdev;
+         const char* name = ((dev_t)kproc->p_tdev != KERN_PROC_TTY_NODEV) ? devname(kproc->p_tdev, S_IFCHR) : NULL;
+         if (!name) {
+            free(proc->tty_name);
+            proc->tty_name = NULL;
+         } else {
+            free_and_xStrdup(&proc->tty_name, name);
+         }
 
          NetBSDProcessList_updateExe(kproc, proc);
          NetBSDProcessList_updateProcessName(this->kd, kproc, proc);
@@ -243,7 +307,7 @@ static void NetBSDProcessList_scanProcs(NetBSDProcessList* this) {
          }
       }
 
-      if (settings->flags & PROCESS_FLAG_CWD) {
+      if (settings->ss->flags & PROCESS_FLAG_CWD) {
          NetBSDProcessList_updateCwd(kproc, proc);
       }
 
@@ -255,39 +319,45 @@ static void NetBSDProcessList_scanProcs(NetBSDProcessList* this) {
       proc->m_virt = kproc->p_vm_vsize;
       proc->m_resident = kproc->p_vm_rssize;
       proc->percent_mem = (proc->m_resident * pageSizeKB) / (double)(this->super.totalMem) * 100.0;
-      proc->percent_cpu = CLAMP(getpcpu(kproc), 0.0, this->super.cpuCount * 100.0);
+      proc->percent_cpu = CLAMP(getpcpu(kproc), 0.0, this->super.activeCPUs * 100.0);
       proc->nlwp = kproc->p_nlwps;
       proc->nice = kproc->p_nice - 20;
       proc->time = 100 * (kproc->p_rtime_sec + ((kproc->p_rtime_usec + 500000) / 1000000));
       proc->priority = kproc->p_priority - PZERO;
+      proc->processor = kproc->p_cpuid;
+      proc->minflt = kproc->p_uru_minflt;
+      proc->majflt = kproc->p_uru_majflt;
 
-      struct kinfo_lwp* klwps = kvm_getlwps(this->kd, kproc->p_pid, kproc->p_paddr, sizeof(struct kinfo_lwp), &nlwps);
+      int nlwps = 0;
+      const struct kinfo_lwp* klwps = kvm_getlwps(this->kd, kproc->p_pid, kproc->p_paddr, sizeof(struct kinfo_lwp), &nlwps);
 
+      /* TODO: According to the link below, SDYING should be a regarded state */
+      /* Taken from: https://ftp.netbsd.org/pub/NetBSD/NetBSD-current/src/sys/sys/proc.h */
       switch (kproc->p_realstat) {
-      case SIDL:     proc->state = 'I'; break;
+      case SIDL:     proc->state = IDLE; break;
       case SACTIVE:
          // We only consider the first LWP with a one of the below states.
          for (int j = 0; j < nlwps; j++) {
             if (klwps) {
                switch (klwps[j].l_stat) {
-               case LSONPROC: proc->state = 'P'; break;
-               case LSRUN:    proc->state = 'R'; break;
-               case LSSLEEP:  proc->state = 'S'; break;
-               case LSSTOP:   proc->state = 'T'; break;
-               default:       proc->state = '?';
+               case LSONPROC: proc->state = RUNNING; break;
+               case LSRUN:    proc->state = RUNNABLE; break;
+               case LSSLEEP:  proc->state = SLEEPING; break;
+               case LSSTOP:   proc->state = STOPPED; break;
+               default:       proc->state = UNKNOWN;
                }
-               if (proc->state != '?')
+               if (proc->state != UNKNOWN)
                   break;
             } else {
-               proc->state = '?';
+               proc->state = UNKNOWN;
                break;
             }
          }
          break;
-      case SSTOP:    proc->state = 'T'; break;
-      case SZOMB:    proc->state = 'Z'; break;
-      case SDEAD:    proc->state = 'D'; break;
-      default:       proc->state = '?';
+      case SSTOP:    proc->state = STOPPED; break;
+      case SZOMB:    proc->state = ZOMBIE; break;
+      case SDEAD:    proc->state = DEFUNCT; break;
+      default:       proc->state = UNKNOWN;
       }
 
       if (Process_isKernelThread(proc)) {
@@ -297,8 +367,7 @@ static void NetBSDProcessList_scanProcs(NetBSDProcessList* this) {
       }
 
       this->super.totalTasks++;
-      // SRUN ('R') means runnable, not running
-      if (proc->state == 'P') {
+      if (proc->state == RUNNING) {
          this->super.runningTasks++;
       }
       proc->updated = true;
@@ -342,9 +411,9 @@ static void NetBSDProcessList_scanCPUTime(NetBSDProcessList* this) {
    u_int64_t kernelTimes[CPUSTATES] = {0};
    u_int64_t avg[CPUSTATES] = {0};
 
-   for (unsigned int i = 0; i < this->super.cpuCount; i++) {
+   for (unsigned int i = 0; i < this->super.existingCPUs; i++) {
       getKernelCPUTimes(i, kernelTimes);
-      CPUData* cpu = this->cpus + i + 1;
+      CPUData* cpu = &this->cpuData[i + 1];
       kernelCPUTimesToHtop(kernelTimes, cpu);
 
       avg[CP_USER] += cpu->userTime;
@@ -355,10 +424,55 @@ static void NetBSDProcessList_scanCPUTime(NetBSDProcessList* this) {
    }
 
    for (int i = 0; i < CPUSTATES; i++) {
-      avg[i] /= this->super.cpuCount;
+      avg[i] /= this->super.activeCPUs;
    }
 
-   kernelCPUTimesToHtop(avg, this->cpus);
+   kernelCPUTimesToHtop(avg, &this->cpuData[0]);
+}
+
+static void NetBSDProcessList_scanCPUFrequency(NetBSDProcessList* this) {
+   unsigned int cpus = this->super.existingCPUs;
+   bool match = false;
+   char name[64];
+   long int freq = 0;
+   size_t freqSize;
+
+   for (unsigned int i = 0; i < cpus; i++) {
+      this->cpuData[i + 1].frequency = NAN;
+   }
+
+   /* newer hardware supports per-core frequency, for e.g. ARM big.LITTLE */
+   for (unsigned int i = 0; i < cpus; i++) {
+      xSnprintf(name, sizeof(name), "machdep.cpufreq.cpu%u.current", i);
+      freqSize = sizeof(freq);
+      if (sysctlbyname(name, &freq, &freqSize, NULL, 0) != -1) {
+         this->cpuData[i + 1].frequency = freq; /* already in MHz */
+         match = true;
+      }
+   }
+
+   if (match) {
+      return;
+   }
+
+   /*
+    * Iterate through legacy sysctl nodes for single-core frequency until
+    * we find a match...
+    */
+   for (size_t i = 0; i < ARRAYSIZE(freqSysctls); i++) {
+      freqSize = sizeof(freq);
+      if (sysctlbyname(freqSysctls[i].name, &freq, &freqSize, NULL, 0) != -1) {
+         freq /= freqSysctls[i].scale; /* scale to MHz */
+         match = true;
+         break;
+      }
+   }
+
+   if (match) {
+      for (unsigned int i = 0; i < cpus; i++) {
+         this->cpuData[i + 1].frequency = freq;
+      }
+   }
 }
 
 void ProcessList_goThroughEntries(ProcessList* super, bool pauseProcessUpdate) {
@@ -367,10 +481,21 @@ void ProcessList_goThroughEntries(ProcessList* super, bool pauseProcessUpdate) {
    NetBSDProcessList_scanMemoryInfo(super);
    NetBSDProcessList_scanCPUTime(npl);
 
+   if (super->settings->showCPUFrequency) {
+      NetBSDProcessList_scanCPUFrequency(npl);
+   }
+
    // in pause mode only gather global data for meters (CPU/memory/...)
    if (pauseProcessUpdate) {
       return;
    }
 
    NetBSDProcessList_scanProcs(npl);
+}
+
+bool ProcessList_isCPUonline(const ProcessList* super, unsigned int id) {
+   assert(id < super->existingCPUs);
+
+   // TODO: Support detecting online / offline CPUs.
+   return true;
 }

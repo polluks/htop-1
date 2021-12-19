@@ -2,7 +2,7 @@
 htop - CommandLine.c
 (C) 2004-2011 Hisham H. Muhammad
 (C) 2020-2021 htop dev team
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -11,6 +11,7 @@ in the source distribution for its full text.
 #include "CommandLine.h"
 
 #include <assert.h>
+#include <ctype.h>
 #include <getopt.h>
 #include <locale.h>
 #include <stdbool.h>
@@ -22,6 +23,7 @@ in the source distribution for its full text.
 
 #include "Action.h"
 #include "CRT.h"
+#include "DynamicColumn.h"
 #include "DynamicMeter.h"
 #include "Hashtable.h"
 #include "Header.h"
@@ -46,7 +48,7 @@ static void printVersionFlag(const char* name) {
 static void printHelpFlag(const char* name) {
    printf("%s " VERSION "\n"
           COPYRIGHT "\n"
-          "Released under the GNU GPLv2.\n\n"
+          "Released under the GNU GPLv2+.\n\n"
           "-C --no-color                   Use a monochrome color scheme\n"
           "-d --delay=DELAY                Set the delay between updates, in tenths of seconds\n"
           "-F --filter=FILTER              Show only the commands matching the given filter\n"
@@ -84,9 +86,9 @@ typedef struct CommandLineSettings_ {
    bool readonly;
 } CommandLineSettings;
 
-static CommandLineSettings parseArguments(const char* program, int argc, char** argv) {
+static CommandLineStatus parseArguments(const char* program, int argc, char** argv, CommandLineSettings* flags) {
 
-   CommandLineSettings flags = {
+   *flags = (CommandLineSettings) {
       .pidMatchList = NULL,
       .commFilter = NULL,
       .userId = (uid_t)-1, // -1 is guaranteed to be an invalid uid_t (see setreuid(2))
@@ -129,10 +131,10 @@ static CommandLineSettings parseArguments(const char* program, int argc, char** 
       switch (opt) {
          case 'h':
             printHelpFlag(program);
-            exit(0);
+            return STATUS_OK_EXIT;
          case 'V':
             printVersionFlag(program);
-            exit(0);
+            return STATUS_OK_EXIT;
          case 's':
             assert(optarg); /* please clang analyzer, cause optarg can be NULL in the 'u' case */
             if (String_eq(optarg, "help")) {
@@ -141,29 +143,29 @@ static CommandLineSettings parseArguments(const char* program, int argc, char** 
                   const char* description = Process_fields[j].description;
                   if (name) printf("%19s %s\n", name, description);
                }
-               exit(0);
+               return STATUS_OK_EXIT;
             }
-            flags.sortKey = 0;
+            flags->sortKey = 0;
             for (int j = 1; j < LAST_PROCESSFIELD; j++) {
                if (Process_fields[j].name == NULL)
                   continue;
                if (String_eq(optarg, Process_fields[j].name)) {
-                  flags.sortKey = j;
+                  flags->sortKey = j;
                   break;
                }
             }
-            if (flags.sortKey == 0) {
+            if (flags->sortKey == 0) {
                fprintf(stderr, "Error: invalid column \"%s\".\n", optarg);
-               exit(1);
+               return STATUS_ERROR_EXIT;
             }
             break;
          case 'd':
-            if (sscanf(optarg, "%16d", &(flags.delay)) == 1) {
-               if (flags.delay < 1) flags.delay = 1;
-               if (flags.delay > 100) flags.delay = 100;
+            if (sscanf(optarg, "%16d", &(flags->delay)) == 1) {
+               if (flags->delay < 1) flags->delay = 1;
+               if (flags->delay > 100) flags->delay = 100;
             } else {
                fprintf(stderr, "Error: invalid delay value \"%s\".\n", optarg);
-               exit(1);
+               return STATUS_ERROR_EXIT;
             }
             break;
          case 'u':
@@ -175,24 +177,30 @@ static CommandLineSettings parseArguments(const char* program, int argc, char** 
             }
 
             if (!username) {
-               flags.userId = geteuid();
-            } else if (!Action_setUserOnly(username, &(flags.userId))) {
-               fprintf(stderr, "Error: invalid user \"%s\".\n", username);
-               exit(1);
+               flags->userId = geteuid();
+            } else if (!Action_setUserOnly(username, &(flags->userId))) {
+               for (const char *itr = username; *itr; ++itr)
+                  if (!isdigit((unsigned char)*itr)) {
+                     fprintf(stderr, "Error: invalid user \"%s\".\n", username);
+                     return STATUS_ERROR_EXIT;
+                  }
+               flags->userId = atol(username);
             }
             break;
          }
          case 'C':
-            flags.useColors = false;
+            flags->useColors = false;
             break;
          case 'M':
-            flags.enableMouse = false;
+#ifdef HAVE_GETMOUSE
+            flags->enableMouse = false;
+#endif
             break;
          case 'U':
-            flags.allowUnicode = false;
+            flags->allowUnicode = false;
             break;
          case 't':
-            flags.treeView = true;
+            flags->treeView = true;
             break;
          case 'p': {
             assert(optarg); /* please clang analyzer, cause optarg can be NULL in the 'u' case */
@@ -200,14 +208,14 @@ static CommandLineSettings parseArguments(const char* program, int argc, char** 
             char* saveptr;
             const char* pid = strtok_r(argCopy, ",", &saveptr);
 
-            if (!flags.pidMatchList) {
-               flags.pidMatchList = Hashtable_new(8, false);
+            if (!flags->pidMatchList) {
+               flags->pidMatchList = Hashtable_new(8, false);
             }
 
             while(pid) {
                 unsigned int num_pid = atoi(pid);
-                //  deepcode ignore CastIntegerToAddress: we just want a non-NUll pointer here
-                Hashtable_put(flags.pidMatchList, num_pid, (void *) 1);
+                //  deepcode ignore CastIntegerToAddress: we just want a non-NULL pointer here
+                Hashtable_put(flags->pidMatchList, num_pid, (void *) 1);
                 pid = strtok_r(NULL, ",", &saveptr);
             }
             free(argCopy);
@@ -216,7 +224,7 @@ static CommandLineSettings parseArguments(const char* program, int argc, char** 
          }
          case 'F': {
             assert(optarg);
-            free_and_xStrdup(&flags.commFilter, optarg);
+            free_and_xStrdup(&flags->commFilter, optarg);
             break;
          }
          case 'H': {
@@ -226,28 +234,30 @@ static CommandLineSettings parseArguments(const char* program, int argc, char** 
                 delay = argv[optind++];
             }
             if (delay) {
-                if (sscanf(delay, "%16d", &(flags.highlightDelaySecs)) == 1) {
-                   if (flags.highlightDelaySecs < 1)
-                      flags.highlightDelaySecs = 1;
+                if (sscanf(delay, "%16d", &(flags->highlightDelaySecs)) == 1) {
+                   if (flags->highlightDelaySecs < 1)
+                      flags->highlightDelaySecs = 1;
                 } else {
                    fprintf(stderr, "Error: invalid highlight delay value \"%s\".\n", delay);
-                   exit(1);
+                   return STATUS_ERROR_EXIT;
                 }
             }
-            flags.highlightChanges = true;
+            flags->highlightChanges = true;
             break;
          }
          case 128:
-            flags.readonly = true;
+            flags->readonly = true;
             break;
 
-         default:
-           if (Platform_getLongOption(opt, argc, argv) == false)
-              exit(1);
-           break;
+         default: {
+            CommandLineStatus status;
+            if ((status = Platform_getLongOption(opt, argc, argv)) != STATUS_OK)
+               return status;
+            break;
+         }
       }
    }
-   return flags;
+   return STATUS_OK;
 }
 
 static void CommandLine_delay(ProcessList* pl, unsigned long millisec) {
@@ -280,20 +290,29 @@ int CommandLine_run(const char* name, int argc, char** argv) {
    else
       setlocale(LC_CTYPE, "");
 
-   CommandLineSettings flags = parseArguments(name, argc, argv);
+   CommandLineStatus status = STATUS_OK;
+   CommandLineSettings flags = { 0 };
+
+   if ((status = parseArguments(name, argc, argv, &flags)) != STATUS_OK)
+      return status != STATUS_OK_EXIT ? 1 : 0;
 
    if (flags.readonly)
       Settings_enableReadonly();
 
-   Platform_init();
+   if (!Platform_init())
+      return 1;
 
    Process_setupColumnWidths();
 
    UsersTable* ut = UsersTable_new();
+   Hashtable* dc = DynamicColumns_new();
    Hashtable* dm = DynamicMeters_new();
-   ProcessList* pl = ProcessList_new(ut, dm, flags.pidMatchList, flags.userId);
+   if (!dc)
+      dc = Hashtable_new(0, true);
 
-   Settings* settings = Settings_new(pl->cpuCount);
+   ProcessList* pl = ProcessList_new(ut, dm, dc, flags.pidMatchList, flags.userId);
+
+   Settings* settings = Settings_new(pl->activeCPUs, dc);
    pl->settings = settings;
 
    Header* header = Header_new(pl, settings, 2);
@@ -304,10 +323,12 @@ int CommandLine_run(const char* name, int argc, char** argv) {
       settings->delay = flags.delay;
    if (!flags.useColors)
       settings->colorScheme = COLORSCHEME_MONOCHROME;
+#ifdef HAVE_GETMOUSE
    if (!flags.enableMouse)
       settings->enableMouse = false;
+#endif
    if (flags.treeView)
-      settings->treeView = true;
+      settings->ss->treeView = true;
    if (flags.highlightChanges)
       settings->highlightChanges = true;
    if (flags.highlightDelaySecs != -1)
@@ -316,9 +337,9 @@ int CommandLine_run(const char* name, int argc, char** argv) {
       // -t -s <key> means "tree sorted by key"
       // -s <key> means "list sorted by key" (previous existing behavior)
       if (!flags.treeView) {
-         settings->treeView = false;
+         settings->ss->treeView = false;
       }
-      Settings_setSortKey(settings, flags.sortKey);
+      ScreenSettings_setSortKey(settings->ss, flags.sortKey);
    }
 
    CRT_init(settings, flags.allowUnicode);
@@ -326,7 +347,7 @@ int CommandLine_run(const char* name, int argc, char** argv) {
    MainPanel* panel = MainPanel_new();
    ProcessList_setPanel(pl, (Panel*) panel);
 
-   MainPanel_updateTreeFunctions(panel, settings->treeView);
+   MainPanel_updateTreeFunctions(panel, settings->ss->treeView);
 
    State state = {
       .settings = settings,
@@ -349,15 +370,10 @@ int CommandLine_run(const char* name, int argc, char** argv) {
    CommandLine_delay(pl, 75);
    ProcessList_scan(pl, false);
 
-   if (settings->allBranchesCollapsed)
+   if (settings->ss->allBranchesCollapsed)
       ProcessList_collapseAllBranches(pl);
 
-   ScreenManager_run(scr, NULL, NULL);
-
-   attron(CRT_colors[RESET_COLOR]);
-   mvhline(LINES - 1, 0, ' ', COLS);
-   attroff(CRT_colors[RESET_COLOR]);
-   refresh();
+   ScreenManager_run(scr, NULL, NULL, NULL);
 
    Platform_done();
 
@@ -380,8 +396,12 @@ int CommandLine_run(const char* name, int argc, char** argv) {
    if (flags.pidMatchList)
       Hashtable_delete(flags.pidMatchList);
 
-   /* Delete Settings last, since it can get accessed in the crash handler */
+   CRT_resetSignalHandlers();
+
+   /* Delete these last, since they can get accessed in the crash handler */
    Settings_delete(settings);
+   DynamicColumns_delete(dc);
+   DynamicMeters_delete(dm);
 
    return 0;
 }

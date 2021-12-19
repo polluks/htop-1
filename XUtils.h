@@ -3,7 +3,7 @@
 /*
 htop - StringUtils.h
 (C) 2004-2011 Hisham H. Muhammad
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -13,7 +13,6 @@ in the source distribution for its full text.
 #include <stdio.h>
 #include <stdlib.h> // IWYU pragma: keep
 #include <string.h> // IWYU pragma: keep
-#include <sys/types.h>
 
 #include "Compat.h"
 #include "Macros.h"
@@ -31,6 +30,8 @@ void* xRealloc(void* ptr, size_t size) ATTR_ALLOC_SIZE1(2);
 
 void* xReallocArray(void* ptr, size_t nmemb, size_t size) ATTR_ALLOC_SIZE2(2, 3);
 
+void* xReallocArrayZero(void* ptr, size_t prevmemb, size_t newmemb, size_t size) ATTR_ALLOC_SIZE2(3, 4);
+
 /*
  * String_startsWith gives better performance if strlen(match) can be computed
  * at compile time (e.g. when they are immutable string literals). :)
@@ -39,9 +40,7 @@ static inline bool String_startsWith(const char* s, const char* match) {
    return strncmp(s, match, strlen(match)) == 0;
 }
 
-static inline bool String_contains_i(const char* s1, const char* s2) {
-   return strcasestr(s1, s2) != NULL;
-}
+bool String_contains_i(const char* s1, const char* s2);
 
 static inline bool String_eq(const char* s1, const char* s2) {
    return strcmp(s1, s2) == 0;

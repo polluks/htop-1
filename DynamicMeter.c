@@ -2,12 +2,17 @@
 htop - DynamicMeter.c
 (C) 2021 htop dev team
 (C) 2021 Red Hat, Inc.  All Rights Reserved.
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
+
 #include "config.h" // IWYU pragma: keep
 
 #include "DynamicMeter.h"
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <string.h>
 
 #include "CRT.h"
 #include "Object.h"
@@ -31,6 +36,13 @@ static const int DynamicMeter_attributes[] = {
 
 Hashtable* DynamicMeters_new(void) {
    return Platform_dynamicMeters();
+}
+
+void DynamicMeters_delete(Hashtable* dynamics) {
+   if (dynamics) {
+      Platform_dynamicMetersDone(dynamics);
+      Hashtable_delete(dynamics);
+   }
 }
 
 typedef struct {

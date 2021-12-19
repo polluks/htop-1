@@ -4,7 +4,7 @@
 htop - SolarisProcessList.h
 (C) 2014 Hisham H. Muhammad
 (C) 2017,2018 Guy M. Broome
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -44,6 +44,7 @@ typedef struct CPUData_ {
    uint64_t lkrnl;
    uint64_t lintr;
    uint64_t lidle;
+   bool online;
 } CPUData;
 
 typedef struct SolarisProcessList_ {
@@ -53,10 +54,12 @@ typedef struct SolarisProcessList_ {
    ZfsArcStats zfs;
 } SolarisProcessList;
 
-ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* dynamicMeters, Hashtable* pidMatchList, uid_t userId);
+ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* dynamicMeters, Hashtable* dynamicColumns, Hashtable* pidMatchList, uid_t userId);
 
 void ProcessList_delete(ProcessList* pl);
 
 void ProcessList_goThroughEntries(ProcessList* super, bool pauseProcessUpdate);
+
+bool ProcessList_isCPUonline(const ProcessList* super, unsigned int id);
 
 #endif

@@ -1,7 +1,7 @@
 /*
 htop - FreeBSDProcessList.c
 (C) 2014 Hisham H. Muhammad
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -56,12 +56,12 @@ static int MIB_kern_cp_time[2];
 static int MIB_kern_cp_times[2];
 static int kernelFScale;
 
-ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* dynamicMeters, Hashtable* pidMatchList, uid_t userId) {
+ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* dynamicMeters, Hashtable* DynamicColumns, Hashtable* pidMatchList, uid_t userId) {
    size_t len;
    char errbuf[_POSIX2_LINE_MAX];
    FreeBSDProcessList* fpl = xCalloc(1, sizeof(FreeBSDProcessList));
    ProcessList* pl = (ProcessList*) fpl;
-   ProcessList_init(pl, Class(FreeBSDProcess), usersTable, dynamicMeters, pidMatchList, userId);
+   ProcessList_init(pl, Class(FreeBSDProcess), usersTable, dynamicMeters, DynamicColumns, pidMatchList, userId);
 
    // physical memory in system: hw.physmem
    // physical page size: hw.pagesize
@@ -109,8 +109,8 @@ ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* dynamicMeters, H
 
    size_t sizeof_cp_time_array = sizeof(unsigned long) * CPUSTATES;
    len = 2; sysctlnametomib("kern.cp_time", MIB_kern_cp_time, &len);
-   fpl->cp_time_o = xCalloc(cpus, sizeof_cp_time_array);
-   fpl->cp_time_n = xCalloc(cpus, sizeof_cp_time_array);
+   fpl->cp_time_o = xCalloc(CPUSTATES, sizeof(unsigned long));
+   fpl->cp_time_n = xCalloc(CPUSTATES, sizeof(unsigned long));
    len = sizeof_cp_time_array;
 
    // fetch initial single (or average) CPU clicks from kernel
@@ -125,13 +125,15 @@ ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* dynamicMeters, H
       sysctl(MIB_kern_cp_times, 2, fpl->cp_times_o, &len, NULL, 0);
    }
 
-   pl->cpuCount = MAXIMUM(cpus, 1);
+   pl->existingCPUs = MAXIMUM(cpus, 1);
+   // TODO: support offline CPUs and hot swapping
+   pl->activeCPUs = pl->existingCPUs;
 
    if (cpus == 1 ) {
       fpl->cpus = xRealloc(fpl->cpus, sizeof(CPUData));
    } else {
       // on smp we need CPUs + 1 to store averages too (as kernel kindly provides that as well)
-      fpl->cpus = xRealloc(fpl->cpus, (pl->cpuCount + 1) * sizeof(CPUData));
+      fpl->cpus = xRealloc(fpl->cpus, (pl->existingCPUs + 1) * sizeof(CPUData));
    }
 
 
@@ -169,8 +171,8 @@ void ProcessList_delete(ProcessList* this) {
 static inline void FreeBSDProcessList_scanCPU(ProcessList* pl) {
    const FreeBSDProcessList* fpl = (FreeBSDProcessList*) pl;
 
-   unsigned int cpus   = pl->cpuCount;   // actual CPU count
-   unsigned int maxcpu = cpus;           // max iteration (in case we have average + smp)
+   unsigned int cpus   = pl->existingCPUs; // actual CPU count
+   unsigned int maxcpu = cpus;             // max iteration (in case we have average + smp)
    int cp_times_offset;
 
    assert(cpus > 0);
@@ -378,16 +380,15 @@ static inline void FreeBSDProcessList_scanMemoryInfo(ProcessList* pl) {
 }
 
 static void FreeBSDProcessList_updateExe(const struct kinfo_proc* kproc, Process* proc) {
-   const int mib[] = { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, kproc->ki_pid };
-   char buffer[2048];
-   size_t size = sizeof(buffer);
-   if (sysctl(mib, 4, buffer, &size, NULL, 0) != 0) {
+   if (Process_isKernelThread(proc)) {
       Process_updateExe(proc, NULL);
       return;
    }
 
-   /* Kernel threads return an empty buffer */
-   if (buffer[0] == '\0') {
+   const int mib[] = { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, kproc->ki_pid };
+   char buffer[2048];
+   size_t size = sizeof(buffer);
+   if (sysctl(mib, 4, buffer, &size, NULL, 0) != 0) {
       Process_updateExe(proc, NULL);
       return;
    }
@@ -443,6 +444,8 @@ static void FreeBSDProcessList_updateProcessName(kvm_t* kd, const struct kinfo_p
    *at = '\0';
 
    Process_updateCmdline(proc, cmdline, 0, end);
+
+   free(cmdline);
 }
 
 static char* FreeBSDProcessList_readJailName(const struct kinfo_proc* kproc) {
@@ -494,12 +497,10 @@ void ProcessList_goThroughEntries(ProcessList* super, bool pauseProcessUpdate) {
       Process* proc = ProcessList_getProcess(super, kproc->ki_pid, &preExisting, FreeBSDProcess_new);
       FreeBSDProcess* fp = (FreeBSDProcess*) proc;
 
-      proc->show = ! ((hideKernelThreads && Process_isKernelThread(proc)) || (hideUserlandThreads && Process_isUserlandThread(proc)));
-
       if (!preExisting) {
          fp->jid = kproc->ki_jid;
          proc->pid = kproc->ki_pid;
-         proc->isKernelThread = kproc->ki_pid != 0 && kproc->ki_pid != 1 && (kproc->ki_flag & P_SYSTEM);
+         proc->isKernelThread = kproc->ki_pid != 1 && (kproc->ki_flag & P_SYSTEM);
          proc->isUserlandThread = false;
          proc->ppid = kproc->ki_ppid;
          proc->tpgid = kproc->ki_tpgid;
@@ -515,7 +516,7 @@ void ProcessList_goThroughEntries(ProcessList* super, bool pauseProcessUpdate) {
          FreeBSDProcessList_updateExe(kproc, proc);
          FreeBSDProcessList_updateProcessName(fpl->kd, kproc, proc);
 
-         if (settings->flags & PROCESS_FLAG_CWD) {
+         if (settings->ss->flags & PROCESS_FLAG_CWD) {
             FreeBSDProcessList_updateCwd(kproc, proc);
          }
 
@@ -577,23 +578,35 @@ void ProcessList_goThroughEntries(ProcessList* super, bool pauseProcessUpdate) {
          proc->nice = PRIO_MAX + 1 + kproc->ki_pri.pri_level - PRI_MIN_IDLE;
       }
 
+      /* Taken from: https://github.com/freebsd/freebsd-src/blob/1ad2d87778970582854082bcedd2df0394fd4933/sys/sys/proc.h#L851 */
       switch (kproc->ki_stat) {
-      case SIDL:   proc->state = 'I'; break;
-      case SRUN:   proc->state = 'R'; break;
-      case SSLEEP: proc->state = 'S'; break;
-      case SSTOP:  proc->state = 'T'; break;
-      case SZOMB:  proc->state = 'Z'; break;
-      case SWAIT:  proc->state = 'D'; break;
-      case SLOCK:  proc->state = 'L'; break;
-      default:     proc->state = '?';
+      case SIDL:   proc->state = IDLE; break;
+      case SRUN:   proc->state = RUNNING; break;
+      case SSLEEP: proc->state = SLEEPING; break;
+      case SSTOP:  proc->state = STOPPED; break;
+      case SZOMB:  proc->state = ZOMBIE; break;
+      case SWAIT:  proc->state = WAITING; break;
+      case SLOCK:  proc->state = BLOCKED; break;
+      default:     proc->state = UNKNOWN;
       }
 
       if (Process_isKernelThread(proc))
          super->kernelThreads++;
 
+      proc->show = ! ((hideKernelThreads && Process_isKernelThread(proc)) || (hideUserlandThreads && Process_isUserlandThread(proc)));
+
       super->totalTasks++;
-      if (proc->state == 'R')
+      if (proc->state == RUNNING)
          super->runningTasks++;
       proc->updated = true;
    }
+}
+
+bool ProcessList_isCPUonline(const ProcessList* super, unsigned int id) {
+   assert(id < super->existingCPUs);
+
+   // TODO: support offline CPUs and hot swapping
+   (void) super; (void) id;
+
+   return true;
 }

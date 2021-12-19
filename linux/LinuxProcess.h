@@ -4,13 +4,14 @@
 htop - LinuxProcess.h
 (C) 2014 Hisham H. Muhammad
 (C) 2020 Red Hat, Inc.  All Rights Reserved.
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
 #include "config.h" // IWYU pragma: keep
 
 #include <stdbool.h>
+#include <sys/types.h>
 
 #include "linux/IOPriority.h"
 #include "Object.h"
@@ -28,6 +29,7 @@ in the source distribution for its full text.
 #define PROCESS_FLAG_LINUX_SECATTR   0x00008000
 #define PROCESS_FLAG_LINUX_LRS_FIX   0x00010000
 #define PROCESS_FLAG_LINUX_DELAYACCT 0x00040000
+#define PROCESS_FLAG_LINUX_AUTOGROUP 0x00080000
 
 typedef struct LinuxProcess_ {
    Process super;
@@ -45,7 +47,9 @@ typedef struct LinuxProcess_ {
    long m_trs;
    long m_drs;
    long m_lrs;
-   long m_dt;
+
+   /* Process flags */
+   unsigned long int flags;
 
    /* Data read (in bytes) */
    unsigned long long io_rchar;
@@ -85,6 +89,7 @@ typedef struct LinuxProcess_ {
    unsigned int vxid;
    #endif
    char* cgroup;
+   char* cgroup_short;
    unsigned int oom;
    #ifdef HAVE_DELAYACCT
    unsigned long long int delay_read_time;
@@ -99,6 +104,10 @@ typedef struct LinuxProcess_ {
    unsigned long ctxt_diff;
    char* secattr;
    unsigned long long int last_mlrs_calctime;
+
+   /* Autogroup scheduling (CFS) information */
+   long int autogroup_id;
+   int autogroup_nice;
 } LinuxProcess;
 
 extern int pageSize;
@@ -116,6 +125,10 @@ void Process_delete(Object* cast);
 IOPriority LinuxProcess_updateIOPriority(LinuxProcess* this);
 
 bool LinuxProcess_setIOPriority(Process* this, Arg ioprio);
+
+bool LinuxProcess_isAutogroupEnabled(void);
+
+bool LinuxProcess_changeAutogroupPriorityBy(Process* this, Arg delta);
 
 bool Process_isThread(const Process* this);
 

@@ -1,7 +1,7 @@
 /*
 htop - Compat.c
 (C) 2020 htop dev team
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -44,7 +44,7 @@ int Compat_faccessat(int dirfd,
 
    // Fallback to stat(2)/lstat(2) depending on flags
    struct stat statinfo;
-   if(flags) {
+   if (flags) {
       ret = lstat(pathname, &statinfo);
    } else {
       ret = stat(pathname, &statinfo);

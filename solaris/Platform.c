@@ -3,7 +3,7 @@ htop - solaris/Platform.c
 (C) 2014 Hisham H. Muhammad
 (C) 2015 David C. Hunt
 (C) 2017,2018 Guy M. Broome
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -24,6 +24,7 @@ in the source distribution for its full text.
 #include "Meter.h"
 #include "CPUMeter.h"
 #include "MemoryMeter.h"
+#include "MemorySwapMeter.h"
 #include "SwapMeter.h"
 #include "TasksMeter.h"
 #include "LoadAverageMeter.h"
@@ -38,6 +39,16 @@ in the source distribution for its full text.
 #include "SolarisProcess.h"
 #include "SolarisProcessList.h"
 
+
+const ScreenDefaults Platform_defaultScreens[] = {
+   {
+      .name = "Default",
+      .columns = "PID LWPID USER PRIORITY NICE M_VIRT M_RESIDENT STATE PERCENT_CPU PERCENT_MEM TIME Command",
+      .sortKey = "PERCENT_CPU",
+   },
+};
+
+const unsigned int Platform_numberOfDefaultScreens = ARRAYSIZE(Platform_defaultScreens);
 
 const SignalItem Platform_signals[] = {
    { .name = " 0 Cancel",      .number =  0 },
@@ -86,8 +97,6 @@ const SignalItem Platform_signals[] = {
 
 const unsigned int Platform_numberOfSignals = ARRAYSIZE(Platform_signals);
 
-const ProcessField Platform_defaultFields[] = { PID, LWPID, USER, PRIORITY, NICE, M_VIRT, M_RESIDENT, STATE, PERCENT_CPU, PERCENT_MEM, TIME, COMM, 0 };
-
 const MeterClass* const Platform_meterTypes[] = {
    &CPUMeter_class,
    &ClockMeter_class,
@@ -97,6 +106,7 @@ const MeterClass* const Platform_meterTypes[] = {
    &LoadMeter_class,
    &MemoryMeter_class,
    &SwapMeter_class,
+   &MemorySwapMeter_class,
    &TasksMeter_class,
    &BatteryMeter_class,
    &HostnameMeter_class,
@@ -120,8 +130,9 @@ const MeterClass* const Platform_meterTypes[] = {
    NULL
 };
 
-void Platform_init(void) {
+bool Platform_init(void) {
    /* no platform-specific setup needed */
+   return true;
 }
 
 void Platform_done(void) {
@@ -184,7 +195,7 @@ int Platform_getMaxPid() {
 
 double Platform_setCPUValues(Meter* this, unsigned int cpu) {
    const SolarisProcessList* spl = (const SolarisProcessList*) this->pl;
-   unsigned int cpus = this->pl->cpuCount;
+   unsigned int cpus = this->pl->existingCPUs;
    const CPUData* cpuData = NULL;
 
    if (cpus == 1) {
@@ -192,6 +203,11 @@ double Platform_setCPUValues(Meter* this, unsigned int cpu) {
       cpuData = &(spl->cpus[0]);
    } else {
       cpuData = &(spl->cpus[cpu]);
+   }
+
+   if (!cpuData->online) {
+      this->curItems = 0;
+      return NAN;
    }
 
    double percent;

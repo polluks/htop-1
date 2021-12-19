@@ -1,7 +1,7 @@
 /*
 htop - CRT.c
 (C) 2004-2011 Hisham H. Muhammad
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -10,8 +10,10 @@ in the source distribution for its full text.
 #include "CRT.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <langinfo.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,12 +22,20 @@ in the source distribution for its full text.
 #include "ProvideCurses.h"
 #include "XUtils.h"
 
-#ifdef HAVE_EXECINFO_H
-#include <execinfo.h>
-#endif
-
 #if !defined(NDEBUG) && defined(HAVE_MEMFD_CREATE)
 #include <sys/mman.h>
+#endif
+
+#if defined(HAVE_LIBUNWIND_H) && defined(HAVE_LIBUNWIND)
+# define PRINT_BACKTRACE
+# define UNW_LOCAL_ONLY
+# include <libunwind.h>
+# if defined(HAVE_DLADDR)
+#  include <dlfcn.h>
+# endif
+#elif defined(HAVE_EXECINFO_H)
+# define PRINT_BACKTRACE
+# include <execinfo.h>
 #endif
 
 
@@ -137,7 +147,7 @@ static int CRT_colorSchemes[LAST_COLORSCHEME][LAST_COLORELEMENT] = {
       [PROCESS_GIGABYTES] = ColorPair(Green, Black),
       [PROCESS_BASENAME] = A_BOLD | ColorPair(Cyan, Black),
       [PROCESS_TREE] = ColorPair(Cyan, Black),
-      [PROCESS_R_STATE] = ColorPair(Green, Black),
+      [PROCESS_RUN_STATE] = ColorPair(Green, Black),
       [PROCESS_D_STATE] = A_BOLD | ColorPair(Red, Black),
       [PROCESS_HIGH_PRIORITY] = ColorPair(Red, Black),
       [PROCESS_LOW_PRIORITY] = ColorPair(Green, Black),
@@ -184,6 +194,11 @@ static int CRT_colorSchemes[LAST_COLORSCHEME][LAST_COLORELEMENT] = {
       [CPU_SOFTIRQ] = ColorPair(Magenta, Black),
       [CPU_STEAL] = ColorPair(Cyan, Black),
       [CPU_GUEST] = ColorPair(Cyan, Black),
+      [PANEL_EDIT] = ColorPair(White, Blue),
+      [SCREENS_OTH_BORDER] = ColorPair(Blue, Blue),
+      [SCREENS_OTH_TEXT] = ColorPair(Black, Blue),
+      [SCREENS_CUR_BORDER] = ColorPair(Green, Green),
+      [SCREENS_CUR_TEXT] = ColorPair(Black, Green),
       [PRESSURE_STALL_THREEHUNDRED] = ColorPair(Cyan, Black),
       [PRESSURE_STALL_SIXTY] = A_BOLD | ColorPair(Cyan, Black),
       [PRESSURE_STALL_TEN] = A_BOLD | ColorPair(White, Black),
@@ -239,7 +254,7 @@ static int CRT_colorSchemes[LAST_COLORSCHEME][LAST_COLORELEMENT] = {
       [PROCESS_GIGABYTES] = A_BOLD,
       [PROCESS_BASENAME] = A_BOLD,
       [PROCESS_TREE] = A_BOLD,
-      [PROCESS_R_STATE] = A_BOLD,
+      [PROCESS_RUN_STATE] = A_BOLD,
       [PROCESS_D_STATE] = A_BOLD,
       [PROCESS_HIGH_PRIORITY] = A_BOLD,
       [PROCESS_LOW_PRIORITY] = A_DIM,
@@ -286,6 +301,11 @@ static int CRT_colorSchemes[LAST_COLORSCHEME][LAST_COLORELEMENT] = {
       [CPU_SOFTIRQ] = A_BOLD,
       [CPU_STEAL] = A_DIM,
       [CPU_GUEST] = A_DIM,
+      [PANEL_EDIT] = A_BOLD,
+      [SCREENS_OTH_BORDER] = A_DIM,
+      [SCREENS_OTH_TEXT] = A_DIM,
+      [SCREENS_CUR_BORDER] = A_REVERSE,
+      [SCREENS_CUR_TEXT] = A_REVERSE,
       [PRESSURE_STALL_THREEHUNDRED] = A_DIM,
       [PRESSURE_STALL_SIXTY] = A_NORMAL,
       [PRESSURE_STALL_TEN] = A_BOLD,
@@ -341,7 +361,7 @@ static int CRT_colorSchemes[LAST_COLORSCHEME][LAST_COLORELEMENT] = {
       [PROCESS_GIGABYTES] = ColorPair(Green, White),
       [PROCESS_BASENAME] = ColorPair(Blue, White),
       [PROCESS_TREE] = ColorPair(Green, White),
-      [PROCESS_R_STATE] = ColorPair(Green, White),
+      [PROCESS_RUN_STATE] = ColorPair(Green, White),
       [PROCESS_D_STATE] = A_BOLD | ColorPair(Red, White),
       [PROCESS_HIGH_PRIORITY] = ColorPair(Red, White),
       [PROCESS_LOW_PRIORITY] = ColorPair(Green, White),
@@ -388,6 +408,11 @@ static int CRT_colorSchemes[LAST_COLORSCHEME][LAST_COLORELEMENT] = {
       [CPU_SOFTIRQ] = ColorPair(Blue, White),
       [CPU_STEAL] = ColorPair(Cyan, White),
       [CPU_GUEST] = ColorPair(Cyan, White),
+      [PANEL_EDIT] = ColorPair(White,Blue),
+      [SCREENS_OTH_BORDER] = A_BOLD | ColorPair(Black,White),
+      [SCREENS_OTH_TEXT] = A_BOLD | ColorPair(Black,White),
+      [SCREENS_CUR_BORDER] = ColorPair(Green,Green),
+      [SCREENS_CUR_TEXT] = ColorPair(Black,Green),
       [PRESSURE_STALL_THREEHUNDRED] = ColorPair(Black, White),
       [PRESSURE_STALL_SIXTY] = ColorPair(Black, White),
       [PRESSURE_STALL_TEN] = ColorPair(Black, White),
@@ -443,7 +468,7 @@ static int CRT_colorSchemes[LAST_COLORSCHEME][LAST_COLORELEMENT] = {
       [PROCESS_GIGABYTES] = ColorPair(Green, Black),
       [PROCESS_BASENAME] = ColorPair(Green, Black),
       [PROCESS_TREE] = ColorPair(Blue, Black),
-      [PROCESS_R_STATE] = ColorPair(Green, Black),
+      [PROCESS_RUN_STATE] = ColorPair(Green, Black),
       [PROCESS_D_STATE] = A_BOLD | ColorPair(Red, Black),
       [PROCESS_HIGH_PRIORITY] = ColorPair(Red, Black),
       [PROCESS_LOW_PRIORITY] = ColorPair(Green, Black),
@@ -490,6 +515,11 @@ static int CRT_colorSchemes[LAST_COLORSCHEME][LAST_COLORELEMENT] = {
       [CPU_SOFTIRQ] = ColorPair(Blue, Black),
       [CPU_STEAL] = ColorPair(Black, Black),
       [CPU_GUEST] = ColorPair(Black, Black),
+      [PANEL_EDIT] = ColorPair(White,Blue),
+      [SCREENS_OTH_BORDER] = ColorPair(Blue,Black),
+      [SCREENS_OTH_TEXT] = ColorPair(Blue,Black),
+      [SCREENS_CUR_BORDER] = ColorPair(Green,Green),
+      [SCREENS_CUR_TEXT] = ColorPair(Black,Green),
       [PRESSURE_STALL_THREEHUNDRED] = ColorPair(Black, Black),
       [PRESSURE_STALL_SIXTY] = ColorPair(Black, Black),
       [PRESSURE_STALL_TEN] = ColorPair(Black, Black),
@@ -545,7 +575,7 @@ static int CRT_colorSchemes[LAST_COLORSCHEME][LAST_COLORELEMENT] = {
       [PROCESS_GIGABYTES] = ColorPair(Green, Blue),
       [PROCESS_BASENAME] = A_BOLD | ColorPair(Cyan, Blue),
       [PROCESS_TREE] = ColorPair(Cyan, Blue),
-      [PROCESS_R_STATE] = ColorPair(Green, Blue),
+      [PROCESS_RUN_STATE] = ColorPair(Green, Blue),
       [PROCESS_D_STATE] = A_BOLD | ColorPair(Red, Blue),
       [PROCESS_HIGH_PRIORITY] = ColorPair(Red, Blue),
       [PROCESS_LOW_PRIORITY] = ColorPair(Green, Blue),
@@ -592,6 +622,11 @@ static int CRT_colorSchemes[LAST_COLORSCHEME][LAST_COLORELEMENT] = {
       [CPU_SOFTIRQ] = ColorPair(Black, Blue),
       [CPU_STEAL] = ColorPair(White, Blue),
       [CPU_GUEST] = ColorPair(White, Blue),
+      [PANEL_EDIT] = ColorPair(White,Blue),
+      [SCREENS_OTH_BORDER] = A_BOLD | ColorPair(Yellow,Blue),
+      [SCREENS_OTH_TEXT] = ColorPair(Cyan,Blue),
+      [SCREENS_CUR_BORDER] = ColorPair(Cyan,Cyan),
+      [SCREENS_CUR_TEXT] = ColorPair(Black,Cyan),
       [PRESSURE_STALL_THREEHUNDRED] = A_BOLD | ColorPair(Black, Blue),
       [PRESSURE_STALL_SIXTY] = A_NORMAL | ColorPair(White, Blue),
       [PRESSURE_STALL_TEN] = A_BOLD | ColorPair(White, Blue),
@@ -651,7 +686,7 @@ static int CRT_colorSchemes[LAST_COLORSCHEME][LAST_COLORELEMENT] = {
       [PROCESS_THREAD_BASENAME] = A_BOLD | ColorPair(Blue, Black),
       [PROCESS_COMM] = ColorPair(Magenta, Black),
       [PROCESS_THREAD_COMM] = ColorPair(Yellow, Black),
-      [PROCESS_R_STATE] = ColorPair(Green, Black),
+      [PROCESS_RUN_STATE] = ColorPair(Green, Black),
       [PROCESS_D_STATE] = A_BOLD | ColorPair(Red, Black),
       [PROCESS_HIGH_PRIORITY] = ColorPair(Red, Black),
       [PROCESS_LOW_PRIORITY] = ColorPair(Green, Black),
@@ -692,6 +727,11 @@ static int CRT_colorSchemes[LAST_COLORSCHEME][LAST_COLORELEMENT] = {
       [CPU_SOFTIRQ] = ColorPair(Blue, Black),
       [CPU_STEAL] = ColorPair(Cyan, Black),
       [CPU_GUEST] = ColorPair(Cyan, Black),
+      [PANEL_EDIT] = ColorPair(White,Cyan),
+      [SCREENS_OTH_BORDER] = ColorPair(White,Black),
+      [SCREENS_OTH_TEXT] = ColorPair(Cyan,Black),
+      [SCREENS_CUR_BORDER] = A_BOLD | ColorPair(White,Black),
+      [SCREENS_CUR_TEXT] = A_BOLD | ColorPair(Green,Black),
       [PRESSURE_STALL_THREEHUNDRED] = ColorPair(Green, Black),
       [PRESSURE_STALL_SIXTY] = ColorPair(Green, Black),
       [PRESSURE_STALL_TEN] = A_BOLD | ColorPair(Green, Black),
@@ -715,8 +755,6 @@ static int CRT_colorSchemes[LAST_COLORSCHEME][LAST_COLORELEMENT] = {
    },
    [COLORSCHEME_BROKENGRAY] = { 0 } // dynamically generated.
 };
-
-int CRT_cursorX = 0;
 
 int CRT_scrollHAmount = 5;
 
@@ -771,6 +809,8 @@ static void dumpStderr(void) {
 
    fsync(STDERR_FILENO);
    dup2(stderrRedirectBackupFd, STDERR_FILENO);
+   close(stderrRedirectBackupFd);
+   stderrRedirectBackupFd = -1;
    lseek(stderrRedirectNewFd, 0, SEEK_SET);
 
    bool header = false;
@@ -791,7 +831,7 @@ static void dumpStderr(void) {
 
       if (res > 0) {
          if (!header) {
-            fprintf(stderr, ">>>>>>>>>> stderr output >>>>>>>>>>\n\n");
+            fprintf(stderr, ">>>>>>>>>> stderr output >>>>>>>>>>\n");
             header = true;
          }
          (void)! write(STDERR_FILENO, buffer, res);
@@ -805,6 +845,16 @@ static void dumpStderr(void) {
    stderrRedirectNewFd = -1;
 }
 
+void CRT_debug_impl(const char* file, size_t lineno, const char* func, const char* fmt, ...)  {
+   va_list args;
+
+   fprintf(stderr, "[%s:%zu (%s)]: ", file, lineno, func);
+   va_start(args, fmt);
+   vfprintf(stderr, fmt, args);
+   va_end(args);
+   fprintf(stderr, "\n");
+}
+
 #else /* !NDEBUG */
 
 static void redirectStderr(void) {
@@ -816,6 +866,38 @@ static void dumpStderr(void) {
 #endif /* !NDEBUG */
 
 static struct sigaction old_sig_handler[32];
+
+static void CRT_installSignalHandlers(void) {
+   struct sigaction act;
+   sigemptyset (&act.sa_mask);
+   act.sa_flags = (int)SA_RESETHAND | SA_NODEFER;
+   act.sa_handler = CRT_handleSIGSEGV;
+   sigaction (SIGSEGV, &act, &old_sig_handler[SIGSEGV]);
+   sigaction (SIGFPE, &act, &old_sig_handler[SIGFPE]);
+   sigaction (SIGILL, &act, &old_sig_handler[SIGILL]);
+   sigaction (SIGBUS, &act, &old_sig_handler[SIGBUS]);
+   sigaction (SIGPIPE, &act, &old_sig_handler[SIGPIPE]);
+   sigaction (SIGSYS, &act, &old_sig_handler[SIGSYS]);
+   sigaction (SIGABRT, &act, &old_sig_handler[SIGABRT]);
+
+   signal(SIGINT, CRT_handleSIGTERM);
+   signal(SIGTERM, CRT_handleSIGTERM);
+   signal(SIGQUIT, CRT_handleSIGTERM);
+}
+
+void CRT_resetSignalHandlers(void) {
+   sigaction (SIGSEGV, &old_sig_handler[SIGSEGV], NULL);
+   sigaction (SIGFPE, &old_sig_handler[SIGFPE], NULL);
+   sigaction (SIGILL, &old_sig_handler[SIGILL], NULL);
+   sigaction (SIGBUS, &old_sig_handler[SIGBUS], NULL);
+   sigaction (SIGPIPE, &old_sig_handler[SIGPIPE], NULL);
+   sigaction (SIGSYS, &old_sig_handler[SIGSYS], NULL);
+   sigaction (SIGABRT, &old_sig_handler[SIGABRT], NULL);
+
+   signal(SIGINT, SIG_DFL);
+   signal(SIGTERM, SIG_DFL);
+   signal(SIGQUIT, SIG_DFL);
+}
 
 void CRT_init(const Settings* settings, bool allowUnicode) {
    redirectStderr();
@@ -836,7 +918,9 @@ void CRT_init(const Settings* settings, bool allowUnicode) {
    nonl();
    intrflush(stdscr, false);
    keypad(stdscr, true);
+#ifdef HAVE_GETMOUSE
    mouseinterval(0);
+#endif
    curs_set(0);
 
    if (has_colors()) {
@@ -851,6 +935,10 @@ void CRT_init(const Settings* settings, bool allowUnicode) {
    }
 
    if (termType && (String_startsWith(termType, "xterm") || String_eq(termType, "vt220"))) {
+#ifdef HTOP_NETBSD
+#define define_key(s_, k_) define_key((char*)s_, k_)
+IGNORE_WCASTQUAL_BEGIN
+#endif
       define_key("\033[H", KEY_HOME);
       define_key("\033[F", KEY_END);
       define_key("\033[7~", KEY_HOME);
@@ -866,28 +954,22 @@ void CRT_init(const Settings* settings, bool allowUnicode) {
       define_key("\033[14~", KEY_F(4));
       define_key("\033[14;2~", KEY_F(15));
       define_key("\033[17;2~", KEY_F(18));
+      define_key("\033[Z", KEY_SHIFT_TAB);
       char sequence[3] = "\033a";
       for (char c = 'a'; c <= 'z'; c++) {
          sequence[1] = c;
          define_key(sequence, KEY_ALT('A' + (c - 'a')));
       }
+#ifdef HTOP_NETBSD
+IGNORE_WCASTQUAL_END
+#undef define_key
+#endif
+   }
+   if (termType && (String_startsWith(termType, "rxvt"))) {
+      define_key("\033[Z", KEY_SHIFT_TAB);
    }
 
-   struct sigaction act;
-   sigemptyset (&act.sa_mask);
-   act.sa_flags = (int)SA_RESETHAND | SA_NODEFER;
-   act.sa_handler = CRT_handleSIGSEGV;
-   sigaction (SIGSEGV, &act, &old_sig_handler[SIGSEGV]);
-   sigaction (SIGFPE, &act, &old_sig_handler[SIGFPE]);
-   sigaction (SIGILL, &act, &old_sig_handler[SIGILL]);
-   sigaction (SIGBUS, &act, &old_sig_handler[SIGBUS]);
-   sigaction (SIGPIPE, &act, &old_sig_handler[SIGPIPE]);
-   sigaction (SIGSYS, &act, &old_sig_handler[SIGSYS]);
-   sigaction (SIGABRT, &act, &old_sig_handler[SIGABRT]);
-
-   signal(SIGINT, CRT_handleSIGTERM);
-   signal(SIGTERM, CRT_handleSIGTERM);
-   signal(SIGQUIT, CRT_handleSIGTERM);
+   CRT_installSignalHandlers();
 
    use_default_colors();
    if (!has_colors())
@@ -910,16 +992,23 @@ void CRT_init(const Settings* settings, bool allowUnicode) {
 #endif
       CRT_treeStrAscii;
 
+#ifdef HAVE_GETMOUSE
 #if NCURSES_MOUSE_VERSION > 1
    mousemask(BUTTON1_RELEASED | BUTTON4_PRESSED | BUTTON5_PRESSED, NULL);
 #else
    mousemask(BUTTON1_RELEASED, NULL);
+#endif
 #endif
 
    CRT_degreeSign = initDegreeSign();
 }
 
 void CRT_done() {
+   attron(CRT_colors[RESET_COLOR]);
+   mvhline(LINES - 1, 0, ' ', COLS);
+   attroff(CRT_colors[RESET_COLOR]);
+   refresh();
+
    curs_set(1);
    endwin();
 
@@ -975,6 +1064,59 @@ void CRT_setColors(int colorScheme) {
    CRT_colors = CRT_colorSchemes[colorScheme];
 }
 
+#ifdef PRINT_BACKTRACE
+static void print_backtrace(void) {
+#if defined(HAVE_LIBUNWIND_H) && defined(HAVE_LIBUNWIND)
+   unw_context_t context;
+   unw_getcontext(&context);
+
+   unw_cursor_t cursor;
+   unw_init_local(&cursor, &context);
+
+   unsigned int item = 0;
+
+   while (unw_step(&cursor) > 0) {
+      unw_word_t pc;
+      unw_get_reg(&cursor, UNW_REG_IP, &pc);
+      if (pc == 0)
+         break;
+
+      char symbolName[256] = "?";
+      unw_word_t offset = 0;
+      unw_get_proc_name(&cursor, symbolName, sizeof(symbolName), &offset);
+
+      unw_proc_info_t pip;
+      pip.unwind_info = NULL;
+
+      const char* fname = "?";
+      const void* ptr = 0;
+      if (unw_get_proc_info(&cursor, &pip) == 0) {
+         ptr = (const void*)(pip.start_ip + offset);
+
+         #ifdef HAVE_DLADDR
+         Dl_info dlinfo;
+         if (dladdr(ptr, &dlinfo) && dlinfo.dli_fname && *dlinfo.dli_fname)
+            fname = dlinfo.dli_fname;
+         #endif
+      }
+
+      const char* frame = "";
+      if (unw_is_signal_frame(&cursor) > 0)
+         frame = "{signal frame}";
+
+      fprintf(stderr, "%2u: %#14lx  %s  (%s+%#lx)  [%p]%s%s\n", item++, pc, fname, symbolName, offset, ptr, frame ? "  " : "", frame);
+   }
+#elif defined(HAVE_EXECINFO_H)
+   void* backtraceArray[256];
+
+   size_t size = backtrace(backtraceArray, ARRAYSIZE(backtraceArray));
+   backtrace_symbols_fd(backtraceArray, size, STDERR_FILENO);
+#else
+#error No implementation for print_backtrace()!
+#endif
+}
+#endif
+
 void CRT_handleSIGSEGV(int signal) {
    CRT_done();
 
@@ -983,15 +1125,14 @@ void CRT_handleSIGSEGV(int signal) {
       "============================\n"
       "Please check at https://htop.dev/issues whether this issue has already been reported.\n"
       "If no similar issue has been reported before, please create a new issue with the following information:\n"
-      "\n"
-      "- Your "PACKAGE" version ("PACKAGE" --version)\n"
-      "- Your OS and kernel version (uname -a)\n"
-      "- Your distribution and release (lsb_release -a)\n"
-      "- Likely steps to reproduce (How did it happened?)\n"
+      "  - Your "PACKAGE" version: '"VERSION"'\n"
+      "  - Your OS and kernel version (uname -a)\n"
+      "  - Your distribution and release (lsb_release -a)\n"
+      "  - Likely steps to reproduce (How did it happen?)\n"
    );
 
-#ifdef HAVE_EXECINFO_H
-   fprintf(stderr, "- Backtrace of the issue (see below)\n");
+#ifdef PRINT_BACKTRACE
+   fprintf(stderr, "  - Backtrace of the issue (see below)\n");
 #endif
 
    fprintf(stderr,
@@ -1014,25 +1155,20 @@ void CRT_handleSIGSEGV(int signal) {
       "Setting information:\n"
       "--------------------\n");
    Settings_write(CRT_crashSettings, true);
-   fprintf(stderr, "\n");
+   fprintf(stderr, "\n\n");
 
-#ifdef HAVE_EXECINFO_H
+#ifdef PRINT_BACKTRACE
    fprintf(stderr,
       "Backtrace information:\n"
       "----------------------\n"
-      "The following function calls were active when the issue was detected:\n"
-      "---\n"
    );
 
-   void* backtraceArray[256];
+   print_backtrace();
 
-   size_t size = backtrace(backtraceArray, ARRAYSIZE(backtraceArray));
-   backtrace_symbols_fd(backtraceArray, size, STDERR_FILENO);
    fprintf(stderr,
-      "---\n"
       "\n"
-      "To make the above information more practical to work with,\n"
-      "please also provide a disassembly of your "PACKAGE" binary.\n"
+      "To make the above information more practical to work with, "
+      "please also provide a disassembly of your "PACKAGE" binary. "
       "This can usually be done by running the following command:\n"
       "\n"
    );
@@ -1046,7 +1182,6 @@ void CRT_handleSIGSEGV(int signal) {
    fprintf(stderr,
       "\n"
       "Please include the generated file in your report.\n"
-      "\n"
    );
 #endif
 
@@ -1054,8 +1189,6 @@ void CRT_handleSIGSEGV(int signal) {
       "Running this program with debug symbols or inside a debugger may provide further insights.\n"
       "\n"
       "Thank you for helping to improve "PACKAGE"!\n"
-      "\n"
-      PACKAGE " " VERSION " aborting.\n"
       "\n"
    );
 

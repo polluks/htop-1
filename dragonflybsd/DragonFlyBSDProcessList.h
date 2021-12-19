@@ -4,7 +4,7 @@
 htop - DragonFlyBSDProcessList.h
 (C) 2014 Hisham H. Muhammad
 (C) 2017 Diederik de Groot
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -53,10 +53,12 @@ typedef struct DragonFlyBSDProcessList_ {
    Hashtable* jails;
 } DragonFlyBSDProcessList;
 
-ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* pidMatchList, uid_t userId);
+ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* dynamicMeters, Hashtable* dynamicColumns, Hashtable* pidMatchList, uid_t userId);
 
 void ProcessList_delete(ProcessList* this);
 
 void ProcessList_goThroughEntries(ProcessList* super, bool pauseProcessUpdate);
+
+bool ProcessList_isCPUonline(const ProcessList* super, unsigned int id);
 
 #endif

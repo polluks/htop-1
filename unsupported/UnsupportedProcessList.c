@@ -1,7 +1,7 @@
 /*
 htop - UnsupportedProcessList.c
 (C) 2014 Hisham H. Muhammad
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -14,11 +14,12 @@ in the source distribution for its full text.
 #include "UnsupportedProcess.h"
 
 
-ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* dynamicMeters, Hashtable* pidMatchList, uid_t userId) {
+ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* dynamicMeters, Hashtable* dynamicColumns, Hashtable* pidMatchList, uid_t userId) {
    ProcessList* this = xCalloc(1, sizeof(ProcessList));
-   ProcessList_init(this, Class(Process), usersTable, dynamicMeters, pidMatchList, userId);
+   ProcessList_init(this, Class(Process), usersTable, dynamicMeters, dynamicColumns, pidMatchList, userId);
 
-   this->cpuCount = 1;
+   this->existingCPUs = 1;
+   this->activeCPUs = 1;
 
    return this;
 }
@@ -50,13 +51,13 @@ void ProcessList_goThroughEntries(ProcessList* super, bool pauseProcessUpdate) {
    Process_updateCmdline(proc, "<unsupported architecture>", 0, 0);
    Process_updateExe(proc, "/path/to/executable");
 
-   if (proc->settings->flags & PROCESS_FLAG_CWD) {
-      proc->procCwd = "/current/working/directory";
+   if (proc->settings->ss->flags & PROCESS_FLAG_CWD) {
+      free_and_xStrdup(&proc->procCwd, "/current/working/directory");
    }
 
    proc->updated = true;
 
-   proc->state = 'R';
+   proc->state = RUNNING;
    proc->isKernelThread = false;
    proc->isUserlandThread = false;
    proc->show = true; /* Reflected in proc->settings-> "hideXXX" really */
@@ -87,4 +88,12 @@ void ProcessList_goThroughEntries(ProcessList* super, bool pauseProcessUpdate) {
 
    if (!preExisting)
       ProcessList_add(super, proc);
+}
+
+bool ProcessList_isCPUonline(const ProcessList* super, unsigned int id) {
+   assert(id < super->existingCPUs);
+
+   (void) super; (void) id;
+
+   return true;
 }

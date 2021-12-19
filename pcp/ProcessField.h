@@ -5,7 +5,7 @@ htop - pcp/ProcessField.h
 (C) 2014 Hisham H. Muhammad
 (C) 2021 htop dev team
 (C) 2020-2021 Red Hat, Inc.  All Rights Reserved.
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -43,8 +43,8 @@ in the source distribution for its full text.
    M_PSSWP = 121,                \
    CTXT = 122,                   \
    SECATTR = 123,                \
-                                 \
-   DUMMY_BUMP_FIELD = CWD,       \
+   AUTOGROUP_ID = 127,           \
+   AUTOGROUP_NICE = 128,         \
    // End of list
 
 

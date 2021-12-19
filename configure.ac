@@ -6,7 +6,7 @@
 # ----------------------------------------------------------------------
 
 AC_PREREQ([2.69])
-AC_INIT([htop], [3.1.0-dev], [htop@groups.io], [], [https://htop.dev/])
+AC_INIT([htop], [3.2.0-dev], [htop@groups.io], [], [https://htop.dev/])
 
 AC_CONFIG_SRCDIR([htop.c])
 AC_CONFIG_AUX_DIR([build-aux])
@@ -69,7 +69,7 @@ AC_USE_SYSTEM_EXTENSIONS
 
 AC_PROG_CC
 AM_PROG_CC_C_O
-AC_PROG_CC_C99
+m4_version_prereq([2.70], [], [AC_PROG_CC_C99])
 AS_IF([test "x$ac_cv_prog_cc_c99" = xno], [AC_MSG_ERROR([htop is written in C99. A newer compiler is required.])])
 
 # ----------------------------------------------------------------------
@@ -116,6 +116,7 @@ case "$enable_pcp" in
                        [AC_MSG_ERROR([can not find PCP header file])])
       AC_SEARCH_LIBS([pmNewContext], [pcp], [], [AC_MSG_ERROR([can not find PCP library])])
       AC_DEFINE([HTOP_PCP], [1], [Define if building pcp-htop binary.])
+      AC_CONFIG_FILES([pcp-htop.5])
       ;;
    *)
       AC_MSG_ERROR([bad value '$enable_pcp' for --enable-pcp option])
@@ -130,7 +131,7 @@ esac
 # ----------------------------------------------------------------------
 
 AC_HEADER_DIRENT
-AC_HEADER_STDC
+m4_version_prereq([2.70], [AC_CHECK_INCLUDES_DEFAULT], [AC_HEADER_STDC])
 AC_CHECK_HEADERS([ \
     stdlib.h \
     string.h \
@@ -187,6 +188,23 @@ AC_COMPILE_IFELSE([
    AC_MSG_RESULT(no))
 CFLAGS="$old_CFLAGS"
 
+AC_MSG_CHECKING(for NaN support)
+AC_RUN_IFELSE([
+   AC_LANG_PROGRAM(
+      [[
+       #include <math.h>
+      ]],
+      [[
+       double x = NAN; return !isnan(x);
+      ]]
+   )],
+   [AC_MSG_RESULT(yes)],
+   [
+      AC_MSG_RESULT(no)
+      AC_MSG_WARN([Compiler does not respect NaN, some functionality might break; consider using '-fno-finite-math-only'])
+   ],
+   [AC_MSG_RESULT(skipped)])
+
 # ----------------------------------------------------------------------
 
 
@@ -216,6 +234,7 @@ fi
 
 if test "$my_htop_platform" = netbsd; then
    AC_SEARCH_LIBS([kvm_open], [kvm], [], [AC_MSG_ERROR([can not find required function kvm_open()])])
+   AC_SEARCH_LIBS([prop_dictionary_get], [prop], [], [AC_MSG_ERROR([can not find required function prop_dictionary_get()])])
 fi
 
 if test "$my_htop_platform" = openbsd; then
@@ -234,6 +253,7 @@ AC_SEARCH_LIBS([clock_gettime], [rt])
 
 AC_CHECK_FUNCS([ \
     clock_gettime \
+    dladdr \
     faccessat \
     fstatat \
     host_get_clock_service \
@@ -241,9 +261,6 @@ AC_CHECK_FUNCS([ \
     openat \
     readlinkat \
    ])
-
-# Add -lexecinfo if needed
-AC_SEARCH_LIBS([backtrace], [execinfo])
 
 if test "$my_htop_platform" = darwin; then
    AC_CHECK_FUNCS([mach_timebase_info])
@@ -348,15 +365,91 @@ if test "$enable_static" = yes; then
 fi
 if test "$my_htop_platform" = "solaris"; then
    # On OmniOS /usr/include/sys/regset.h redefines ERR to 13 - \r, breaking the Enter key.
-   # Since ncruses macros use the ERR macro, we can not use another name.
+   # Since ncurses macros use the ERR macro, we can not use another name.
    AC_DEFINE([ERR], [(-1)], [Predefine ncurses macro.])
 fi
 AC_CHECK_FUNCS( [set_escdelay] )
+AC_CHECK_FUNCS( [getmouse] )
+
+
+AC_ARG_ENABLE([affinity],
+              [AS_HELP_STRING([--enable-affinity],
+                              [enable sched_setaffinity and sched_getaffinity for affinity support, conflicts with hwloc @<:@default=check@:>@])],
+              [],
+              [enable_affinity=check])
+if test "x$enable_affinity" = xcheck; then
+   if test "x$enable_hwloc" = xyes; then
+      enable_affinity=no
+   else
+      AC_MSG_CHECKING([for usable sched_setaffinity])
+      AC_RUN_IFELSE([
+         AC_LANG_PROGRAM([[
+            #include <sched.h>
+            #include <errno.h>
+            static cpu_set_t cpuset;
+         ]], [[
+            CPU_ZERO(&cpuset);
+            sched_setaffinity(0, sizeof(cpu_set_t), &cpuset);
+            if (errno == ENOSYS) return 1;
+         ]])],
+      [enable_affinity=yes
+         AC_MSG_RESULT([yes])],
+      [enable_affinity=no
+         AC_MSG_RESULT([no])],
+      [AC_MSG_RESULT([yes (assumed while cross compiling)])])
+   fi
+fi
+if test "x$enable_affinity" = xyes; then
+   if test "x$enable_hwloc" = xyes; then
+      AC_MSG_ERROR([--enable-hwloc and --enable-affinity are mutual exclusive. Specify at most one of them.])
+   fi
+   AC_DEFINE([HAVE_AFFINITY], [1], [Define if sched_setaffinity and sched_getaffinity are to be used.])
+fi
+
+
+AC_ARG_ENABLE([unwind],
+              [AS_HELP_STRING([--enable-unwind],
+              [enable unwind support for printing backtraces; requires libunwind @<:@default=check@:>@])],
+              [],
+              [enable_unwind=check])
+case "$enable_unwind" in
+   check)
+      enable_unwind=yes
+      if test "$enable_static" = yes; then
+         AC_CHECK_LIB([lzma], [lzma_index_buffer_decode])
+      fi
+      AC_CHECK_LIB([unwind], [backtrace], [], [enable_unwind=no])
+      AC_CHECK_HEADERS([libunwind.h], [], [
+         old_CFLAGS="$CFLAGS"
+         CFLAGS="$CFLAGS -I/usr/include/libunwind"
+         AC_CHECK_HEADERS([libunwind/libunwind.h], [], [
+            enable_unwind=no
+            CFLAGS="$old_CFLAGS"
+         ])
+      ])
+      ;;
+   no)
+      ;;
+   yes)
+      AC_CHECK_LIB([unwind], [backtrace], [], [AC_MSG_ERROR([can not find required library libunwind])])
+      AC_CHECK_HEADERS([libunwind.h], [], [
+         CFLAGS="$CFLAGS -I/usr/include/libunwind"
+         AC_CHECK_HEADERS([libunwind/libunwind.h], [], [AC_MSG_ERROR([can not find required header file libunwind.h])])
+      ])
+      ;;
+   *)
+      AC_MSG_ERROR([bad value '$enable_unwind' for --enable-unwind])
+      ;;
+esac
+if test "x$enable_unwind" = xno; then
+   # Fall back to backtrace(3) and add -lexecinfo if needed
+   AC_SEARCH_LIBS([backtrace], [execinfo])
+fi
 
 
 AC_ARG_ENABLE([hwloc],
               [AS_HELP_STRING([--enable-hwloc],
-              [enable hwloc support for CPU affinity; disables Linux affinity; requires libhwloc @<:@default=no@:>@])],
+              [enable hwloc support for CPU affinity; disables affinity support; requires libhwloc @<:@default=no@:>@])],
               [],
               [enable_hwloc=no])
 case "$enable_hwloc" in
@@ -370,6 +463,7 @@ case "$enable_hwloc" in
       AC_MSG_ERROR([bad value '$enable_hwloc' for --enable-hwloc])
       ;;
 esac
+
 
 AC_ARG_WITH([os-release],
             [AS_HELP_STRING([--with-os-release=FILE],
@@ -417,7 +511,7 @@ AC_ARG_ENABLE([vserver],
               [],
               [enable_vserver=no])
 if test "x$enable_vserver" = xyes; then
-    AC_DEFINE([HAVE_VSERVER], [1], [Define if VServer support enabled.])
+   AC_DEFINE([HAVE_VSERVER], [1], [Define if VServer support enabled.])
 fi
 
 
@@ -427,43 +521,11 @@ AC_ARG_ENABLE([ancient_vserver],
               [],
               [enable_ancient_vserver=no])
 if test "x$enable_ancient_vserver" = xyes; then
-    AC_DEFINE([HAVE_VSERVER], [1], [Define if VServer support enabled.])
-    AC_DEFINE([HAVE_ANCIENT_VSERVER], [1], [Define if ancient vserver support enabled.])
-fi
-
-
-AC_ARG_ENABLE([linux_affinity],
-              [AS_HELP_STRING([--enable-linux-affinity],
-                              [enable Linux sched_setaffinity and sched_getaffinity for affinity support, conflicts with hwloc @<:@default=check@:>@])],
-              [],
-              [enable_linux_affinity=check])
-if test "x$enable_linux_affinity" = xcheck; then
-   if test "x$enable_hwloc" = xyes; then
-      enable_linux_affinity=no
-   else
-      AC_MSG_CHECKING([for usable sched_setaffinity])
-      AC_RUN_IFELSE([
-         AC_LANG_PROGRAM([[
-            #include <sched.h>
-            #include <errno.h>
-            static cpu_set_t cpuset;
-         ]], [[
-            CPU_ZERO(&cpuset);
-            sched_setaffinity(0, sizeof(cpu_set_t), &cpuset);
-            if (errno == ENOSYS) return 1;
-         ]])],
-      [enable_linux_affinity=yes
-         AC_MSG_RESULT([yes])],
-      [enable_linux_affinity=no
-         AC_MSG_RESULT([no])],
-      [AC_MSG_RESULT([yes (assumed while cross compiling)])])
+   if test "x$enable_vserver" != xyes; then
+      enable_vserver=implied
    fi
-fi
-if test "x$enable_linux_affinity" = xyes; then
-   if test "x$enable_hwloc" = xyes; then
-      AC_MSG_ERROR([--enable-hwloc and --enable-linux-affinity are mutual exclusive. Specify at most one of them.])
-   fi
-   AC_DEFINE([HAVE_LINUX_AFFINITY], [1], [Define if Linux sched_setaffinity and sched_getaffinity are to be used.])
+   AC_DEFINE([HAVE_VSERVER], [1], [Define if VServer support enabled.])
+   AC_DEFINE([HAVE_ANCIENT_VSERVER], [1], [Define if ancient vserver support enabled.])
 fi
 
 
@@ -616,7 +678,9 @@ AS_VAR_IF(CACHEVAR,yes,
 AS_VAR_POPDEF([CACHEVAR])dnl
 ])dnl AX_CHECK_COMPILE_FLAGS
 
-AX_CHECK_COMPILE_FLAG([-Wnull-dereference], [AM_CFLAGS="$AM_CFLAGS -Wnull-dereference"], , [-Werror])
+AX_CHECK_COMPILE_FLAG([-Wextra-semi-stmt],         [AM_CFLAGS="$AM_CFLAGS -Wextra-semi-stmt"],         , [-Werror=unknown-warning-option]) dnl the autoconf check itself generates -Wextra-semi-stmt
+AX_CHECK_COMPILE_FLAG([-Wimplicit-int-conversion], [AM_CFLAGS="$AM_CFLAGS -Wimplicit-int-conversion"], , [-Werror])
+AX_CHECK_COMPILE_FLAG([-Wnull-dereference],        [AM_CFLAGS="$AM_CFLAGS -Wnull-dereference"],        , [-Werror])
 
 AC_ARG_ENABLE([werror],
               [AS_HELP_STRING([--enable-werror],
@@ -687,11 +751,12 @@ AC_MSG_RESULT([
   (Linux) openvz:            $enable_openvz
   (Linux) vserver:           $enable_vserver
   (Linux) ancient vserver:   $enable_ancient_vserver
-  (Linux) affinity:          $enable_linux_affinity
   (Linux) delay accounting:  $enable_delayacct
   (Linux) sensors:           $enable_sensors
   (Linux) capabilities:      $enable_capabilities
   unicode:                   $enable_unicode
+  affinity:                  $enable_affinity
+  unwind:                    $enable_unwind
   hwloc:                     $enable_hwloc
   debug:                     $enable_debug
   static:                    $enable_static

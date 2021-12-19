@@ -1,7 +1,7 @@
 /*
 htop - TraceScreen.c
 (C) 2005-2006 Hisham H. Muhammad
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -18,7 +18,6 @@ in the source distribution for its full text.
 #include <string.h>
 #include <unistd.h>
 #include <sys/select.h>
-#include <sys/time.h>
 #include <sys/wait.h>
 
 #include "CRT.h"

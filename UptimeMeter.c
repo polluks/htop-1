@@ -1,7 +1,7 @@
 /*
 htop - UptimeMeter.c
 (C) 2004-2011 Hisham H. Muhammad
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -19,7 +19,7 @@ static const int UptimeMeter_attributes[] = {
 
 static void UptimeMeter_updateValues(Meter* this) {
    int totalseconds = Platform_getUptime();
-   if (totalseconds == -1) {
+   if (totalseconds <= 0) {
       xSnprintf(this->txtBuffer, sizeof(this->txtBuffer), "(unknown)");
       return;
    }

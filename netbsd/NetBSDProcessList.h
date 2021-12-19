@@ -6,7 +6,7 @@ htop - NetBSDProcessList.h
 (C) 2015 Michael McConville
 (C) 2021 Santhosh Raju
 (C) 2021 htop dev team
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -37,17 +37,19 @@ typedef struct CPUData_ {
    unsigned long long int spinPeriod;
    unsigned long long int intrPeriod;
    unsigned long long int idlePeriod;
+
+   double frequency;
 } CPUData;
 
 typedef struct NetBSDProcessList_ {
    ProcessList super;
    kvm_t* kd;
 
-   CPUData* cpus;
+   CPUData* cpuData;
 } NetBSDProcessList;
 
 
-ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* dynamicMeters, Hashtable* pidMatchList, uid_t userId);
+ProcessList* ProcessList_new(UsersTable* usersTable, Hashtable* dynamicMeters, Hashtable* dynamicColumns, Hashtable* pidMatchList, uid_t userId);
 
 void ProcessList_delete(ProcessList* this);
 

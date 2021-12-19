@@ -1,7 +1,7 @@
 /*
 htop - AffinityPanel.c
 (C) 2004-2011 Hisham H. Muhammad
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -383,7 +383,10 @@ Panel* AffinityPanel_new(ProcessList* pl, const Affinity* affinity, int* width) 
    Panel_setHeader(super, "Use CPUs:");
 
    unsigned int curCpu = 0;
-   for (unsigned int i = 0; i < pl->cpuCount; i++) {
+   for (unsigned int i = 0; i < pl->existingCPUs; i++) {
+      if (!ProcessList_isCPUonline(this->pl, i))
+         continue;
+
       char number[16];
       xSnprintf(number, 9, "CPU %d", Settings_cpuId(pl->settings, i));
       unsigned cpu_width = 4 + strlen(number);
@@ -422,12 +425,12 @@ Affinity* AffinityPanel_getAffinity(Panel* super, ProcessList* pl) {
    Affinity* affinity = Affinity_new(pl);
 
    #ifdef HAVE_LIBHWLOC
-   unsigned int i;
+   int i;
    hwloc_bitmap_foreach_begin(i, this->workCpuset)
-   Affinity_add(affinity, i);
+      Affinity_add(affinity, (unsigned)i);
    hwloc_bitmap_foreach_end();
    #else
-   for (unsigned int i = 0; i < this->pl->cpuCount; i++) {
+   for (int i = 0; i < Vector_size(this->cpuids); i++) {
       const MaskItem* item = (const MaskItem*)Vector_get(this->cpuids, i);
       if (item->value) {
          Affinity_add(affinity, item->cpu);

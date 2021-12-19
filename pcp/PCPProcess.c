@@ -1,9 +1,9 @@
 /*
 htop - PCPProcess.c
 (C) 2014 Hisham H. Muhammad
-(C) 2020 htop dev team
-(C) 2020-2021 Red Hat, Inc.  All Rights Reserved.
-Released under the GNU GPLv2, see the COPYING file
+(C) 2020-2021 htop dev team
+(C) 2020-2021 Red Hat, Inc.
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -12,14 +12,16 @@ in the source distribution for its full text.
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <syscall.h>
-#include <unistd.h>
 
 #include "CRT.h"
+#include "Macros.h"
 #include "Process.h"
 #include "ProvideCurses.h"
+#include "RichString.h"
 #include "XUtils.h"
+
+#include "pcp/PCPDynamicColumn.h"
+
 
 const ProcessFieldData Process_fields[] = {
    [0] = { .name = "", .title = NULL, .description = NULL, .flags = 0, },
@@ -51,11 +53,11 @@ const ProcessFieldData Process_fields[] = {
    [M_DRS] = { .name = "M_DRS", .title = " DATA ", .description = "Size of the data segment plus stack usage of the process", .flags = 0, .defaultSortDesc = true, },
    [M_LRS] = { .name = "M_LRS", .title = "  LIB ", .description = "The library size of the process (unused since Linux 2.6; always 0)", .flags = 0, .defaultSortDesc = true, },
    [M_DT] = { .name = "M_DT", .title = " DIRTY ", .description = "Size of the dirty pages of the process (unused since Linux 2.6; always 0)", .flags = 0, .defaultSortDesc = true, },
-   [ST_UID] = { .name = "ST_UID", .title = "  UID ", .description = "User ID of the process owner", .flags = 0, },
+   [ST_UID] = { .name = "ST_UID", .title = "UID", .description = "User ID of the process owner", .flags = 0, },
    [PERCENT_CPU] = { .name = "PERCENT_CPU", .title = "CPU% ", .description = "Percentage of the CPU time the process used in the last sampling", .flags = 0, .defaultSortDesc = true, },
    [PERCENT_NORM_CPU] = { .name = "PERCENT_NORM_CPU", .title = "NCPU%", .description = "Normalized percentage of the CPU time the process used in the last sampling (normalized by cpu count)", .flags = 0, .defaultSortDesc = true, },
    [PERCENT_MEM] = { .name = "PERCENT_MEM", .title = "MEM% ", .description = "Percentage of the memory the process is using, based on resident memory size", .flags = 0, .defaultSortDesc = true, },
-   [USER] = { .name = "USER", .title = "USER      ", .description = "Username of the process owner (or user ID if name cannot be determined)", .flags = 0, },
+   [USER] = { .name = "USER", .title = "USER       ", .description = "Username of the process owner (or user ID if name cannot be determined)", .flags = 0, },
    [TIME] = { .name = "TIME", .title = "  TIME+  ", .description = "Total time the process has spent in user and system time", .flags = 0, .defaultSortDesc = true, },
    [NLWP] = { .name = "NLWP", .title = "NLWP ", .description = "Number of threads in the process", .flags = 0, .defaultSortDesc = true, },
    [TGID] = { .name = "TGID", .title = "TGID", .description = "Thread group ID (i.e. process ID)", .flags = 0, },
@@ -82,6 +84,8 @@ const ProcessFieldData Process_fields[] = {
    [PROC_COMM] = { .name = "COMM", .title = "COMM            ", .description = "comm string of the process", .flags = 0, },
    [PROC_EXE] = { .name = "EXE", .title = "EXE             ", .description = "Basename of exe of the process", .flags = 0, },
    [CWD] = { .name = "CWD", .title = "CWD                       ", .description = "The current working directory of the process", .flags = PROCESS_FLAG_CWD, },
+   [AUTOGROUP_ID] = { .name = "AUTOGROUP_ID", .title = "AGRP", .description = "The autogroup identifier of the process", .flags = PROCESS_FLAG_LINUX_AUTOGROUP, },
+   [AUTOGROUP_NICE] = { .name = "AUTOGROUP_NICE", .title = " ANI", .description = "Nice value (the higher the value, the more other processes take priority) associated with the process autogroup", .flags = PROCESS_FLAG_LINUX_AUTOGROUP, },
 };
 
 Process* PCPProcess_new(const Settings* settings) {
@@ -168,6 +172,25 @@ static void PCPProcess_writeField(const Process* this, RichString* str, ProcessF
       xSnprintf(buffer, n, "%5lu ", pp->ctxt_diff);
       break;
    case SECATTR: snprintf(buffer, n, "%-30s   ", pp->secattr ? pp->secattr : "?"); break;
+   case AUTOGROUP_ID:
+      if (pp->autogroup_id != -1) {
+         xSnprintf(buffer, n, "%4ld ", pp->autogroup_id);
+      } else {
+         attr = CRT_colors[PROCESS_SHADOW];
+         xSnprintf(buffer, n, " N/A ");
+      }
+      break;
+   case AUTOGROUP_NICE:
+      if (pp->autogroup_id != -1) {
+         xSnprintf(buffer, n, "%3d ", pp->autogroup_nice);
+         attr = pp->autogroup_nice < 0 ? CRT_colors[PROCESS_HIGH_PRIORITY]
+              : pp->autogroup_nice > 0 ? CRT_colors[PROCESS_LOW_PRIORITY]
+              : CRT_colors[PROCESS_SHADOW];
+      } else {
+         attr = CRT_colors[PROCESS_SHADOW];
+         xSnprintf(buffer, n, "N/A ");
+      }
+      break;
    default:
       Process_writeField(this, str, field);
       return;
@@ -245,8 +268,14 @@ static int PCPProcess_compareByKey(const Process* v1, const Process* v2, Process
       return SPACESHIP_NUMBER(p1->ctxt_diff, p2->ctxt_diff);
    case SECATTR:
       return SPACESHIP_NULLSTR(p1->secattr, p2->secattr);
+   case AUTOGROUP_ID:
+      return SPACESHIP_NUMBER(p1->autogroup_id, p2->autogroup_id);
+   case AUTOGROUP_NICE:
+      return SPACESHIP_NUMBER(p1->autogroup_nice, p2->autogroup_nice);
    default:
-      return Process_compareByKey_Base(v1, v2, key);
+      if (key < LAST_PROCESSFIELD)
+         return Process_compareByKey_Base(v1, v2, key);
+      return PCPDynamicColumn_compareByKey(p1, p2, key);
    }
 }
 

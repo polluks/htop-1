@@ -2,7 +2,7 @@
 htop - Process.c
 (C) 2004-2015 Hisham H. Muhammad
 (C) 2020 Red Hat, Inc.  All Rights Reserved.
-Released under the GNU GPLv2, see the COPYING file
+Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
 */
 
@@ -26,6 +26,7 @@ in the source distribution for its full text.
 #include "Macros.h"
 #include "Platform.h"
 #include "ProcessList.h"
+#include "DynamicColumn.h"
 #include "RichString.h"
 #include "Settings.h"
 #include "XUtils.h"
@@ -40,15 +41,31 @@ static const char* const kthreadID = "KTHREAD";
 
 static uid_t Process_getuid = (uid_t)-1;
 
-int Process_pidDigits = 7;
+int Process_pidDigits = PROCESS_MIN_PID_DIGITS;
+int Process_uidDigits = PROCESS_MIN_UID_DIGITS;
 
 void Process_setupColumnWidths() {
    int maxPid = Platform_getMaxPid();
    if (maxPid == -1)
       return;
 
+   if (maxPid < (int)pow(10, PROCESS_MIN_PID_DIGITS)) {
+      Process_pidDigits = PROCESS_MIN_PID_DIGITS;
+      return;
+   }
+
    Process_pidDigits = ceil(log10(maxPid));
    assert(Process_pidDigits <= PROCESS_MAX_PID_DIGITS);
+}
+
+void Process_setUidColumnWidth(uid_t maxUid) {
+   if (maxUid < (uid_t)pow(10, PROCESS_MIN_UID_DIGITS)) {
+      Process_uidDigits = PROCESS_MIN_UID_DIGITS;
+      return;
+   }
+
+   Process_uidDigits = ceil(log10(maxUid));
+   assert(Process_uidDigits <= PROCESS_MAX_UID_DIGITS);
 }
 
 void Process_printBytes(RichString* str, unsigned long long number, bool coloring) {
@@ -380,7 +397,7 @@ static inline char* stpcpyWithNewlineConversion(char* dstStr, const char* srcStr
  * This function makes the merged Command string. It also stores the offsets of the
  * basename, comm w.r.t the merged Command string - these offsets will be used by
  * Process_writeCommand() for coloring. The merged Command string is also
- * returned by Process_getCommandStr() for searching, sorting and filtering.
+ * returned by Process_getCommand() for searching, sorting and filtering.
  */
 void Process_makeCommandStr(Process* this) {
    ProcessMergedCommand* mc = &this->mergedCommand;
@@ -390,6 +407,7 @@ void Process_makeCommandStr(Process* this) {
    bool showProgramPath = settings->showProgramPath;
    bool searchCommInCmdline = settings->findCommInCmdline;
    bool stripExeFromCmdline = settings->stripExeFromCmdline;
+   bool showThreadNames = settings->showThreadNames;
 
    /* Nothing to do to (Re)Generate the Command string, if the process is:
     * - a kernel thread, or
@@ -397,9 +415,9 @@ void Process_makeCommandStr(Process* this) {
     * - a user thread and showThreadNames is not set */
    if (Process_isKernelThread(this))
       return;
-   if (this->state == 'Z' && !this->mergedCommand.str)
+   if (this->state == ZOMBIE && !this->mergedCommand.str)
       return;
-   if (Process_isUserlandThread(this) && settings->showThreadNames)
+   if (Process_isUserlandThread(this) && settings->showThreadNames && (showThreadNames == mc->prevShowThreadNames))
       return;
 
    /* this->mergedCommand.str needs updating only if its state or contents changed.
@@ -409,6 +427,7 @@ void Process_makeCommandStr(Process* this) {
       mc->prevPathSet == showProgramPath &&
       mc->prevCommSet == searchCommInCmdline &&
       mc->prevCmdlineSet == stripExeFromCmdline &&
+      mc->prevShowThreadNames == showThreadNames &&
       !mc->cmdlineChanged &&
       !mc->commChanged &&
       !mc->exeChanged
@@ -438,6 +457,7 @@ void Process_makeCommandStr(Process* this) {
    mc->prevPathSet = showProgramPath;
    mc->prevCommSet = searchCommInCmdline;
    mc->prevCmdlineSet = stripExeFromCmdline;
+   mc->prevShowThreadNames = showThreadNames;
 
    /* Mark everything as unchanged */
    mc->cmdlineChanged = false;
@@ -454,7 +474,7 @@ void Process_makeCommandStr(Process* this) {
          /* Check if we still have capacity */                                                \
          assert(mc->highlightCount < ARRAYSIZE(mc->highlights));                              \
          if (mc->highlightCount >= ARRAYSIZE(mc->highlights))                                 \
-            continue;                                                                         \
+            break;                                                                            \
                                                                                               \
          mc->highlights[mc->highlightCount].offset = str - strStart + (_offset) - mbMismatch; \
          mc->highlights[mc->highlightCount].length = _length;                                 \
@@ -496,7 +516,7 @@ void Process_makeCommandStr(Process* this) {
    assert(cmdlineBasenameStart <= (int)strlen(cmdline));
 
    if (!showMergedCommand || !procExe || !procComm) { /* fall back to cmdline */
-      if (showMergedCommand && !procExe && procComm && strlen(procComm)) { /* Prefix column with comm */
+      if (showMergedCommand && (!Process_isUserlandThread(this) || showThreadNames) && !procExe && procComm && strlen(procComm)) { /* Prefix column with comm */
          if (strncmp(cmdline + cmdlineBasenameStart, procComm, MINIMUM(TASK_COMM_LEN - 1, strlen(procComm))) != 0) {
             WRITE_HIGHLIGHT(0, strlen(procComm), commAttr, CMDLINE_HIGHLIGHT_FLAG_COMM);
             str = stpcpy(str, procComm);
@@ -507,6 +527,12 @@ void Process_makeCommandStr(Process* this) {
 
       if (cmdlineBasenameEnd > cmdlineBasenameStart)
          WRITE_HIGHLIGHT(showProgramPath ? cmdlineBasenameStart : 0, cmdlineBasenameEnd - cmdlineBasenameStart, baseAttr, CMDLINE_HIGHLIGHT_FLAG_BASENAME);
+
+      if (this->procExeDeleted)
+         WRITE_HIGHLIGHT(showProgramPath ? cmdlineBasenameStart : 0, cmdlineBasenameEnd - cmdlineBasenameStart, delExeAttr, CMDLINE_HIGHLIGHT_FLAG_DELETED);
+      else if (this->usesDeletedLib)
+         WRITE_HIGHLIGHT(showProgramPath ? cmdlineBasenameStart : 0, cmdlineBasenameEnd - cmdlineBasenameStart, delLibAttr, CMDLINE_HIGHLIGHT_FLAG_DELETED);
+
       (void)stpcpyWithNewlineConversion(str, cmdline + (showProgramPath ? 0 : cmdlineBasenameStart));
 
       return;
@@ -520,7 +546,7 @@ void Process_makeCommandStr(Process* this) {
    assert(exeBasenameOffset <= (int)strlen(procExe));
 
    bool haveCommInExe = false;
-   if (procExe && procComm) {
+   if (procExe && procComm && (!Process_isUserlandThread(this) || showThreadNames)) {
       haveCommInExe = strncmp(procExe + exeBasenameOffset, procComm, TASK_COMM_LEN - 1) == 0;
    }
 
@@ -552,14 +578,14 @@ void Process_makeCommandStr(Process* this) {
    /* Try to match procComm with procExe's basename: This is reliable (predictable) */
    if (searchCommInCmdline) {
       /* commStart/commEnd will be adjusted later along with cmdline */
-      haveCommInCmdline = findCommInCmdline(procComm, cmdline, cmdlineBasenameStart, &commStart, &commEnd);
+      haveCommInCmdline = (!Process_isUserlandThread(this) || showThreadNames) && findCommInCmdline(procComm, cmdline, cmdlineBasenameStart, &commStart, &commEnd);
    }
 
    int matchLen = matchCmdlinePrefixWithExeSuffix(cmdline, cmdlineBasenameStart, procExe, exeBasenameOffset, exeBasenameLen);
 
    bool haveCommField = false;
 
-   if (!haveCommInExe && !haveCommInCmdline && procComm) {
+   if (!haveCommInExe && !haveCommInCmdline && procComm && (!Process_isUserlandThread(this) || showThreadNames)) {
       WRITE_SEPARATOR;
       WRITE_HIGHLIGHT(0, strlen(procComm), commAttr, CMDLINE_HIGHLIGHT_FLAG_COMM);
       str = stpcpy(str, procComm);
@@ -579,7 +605,7 @@ void Process_makeCommandStr(Process* this) {
       WRITE_SEPARATOR;
    }
 
-   if (!haveCommInExe && haveCommInCmdline && !haveCommField)
+   if (!haveCommInExe && haveCommInCmdline && !haveCommField && (!Process_isUserlandThread(this) || showThreadNames))
       WRITE_HIGHLIGHT(commStart, commEnd - commStart, commAttr, CMDLINE_HIGHLIGHT_FLAG_COMM);
 
    /* Display cmdline if it hasn't been consumed by procExe */
@@ -703,6 +729,48 @@ void Process_printLeftAlignedField(RichString* str, int attr, const char* conten
    RichString_appendChr(str, attr, ' ', width + 1 - columns);
 }
 
+void Process_printPercentage(float val, char* buffer, int n, int* attr) {
+   if (val >= 0) {
+      if (val < 99.9F) {
+         if (val < 0.05F) {
+            *attr = CRT_colors[PROCESS_SHADOW];
+         }
+         xSnprintf(buffer, n, "%4.1f ", val);
+      } else if (val < 999) {
+         *attr = CRT_colors[PROCESS_MEGABYTES];
+         xSnprintf(buffer, n, "%3d. ", (int)val);
+      } else {
+         *attr = CRT_colors[PROCESS_MEGABYTES];
+         xSnprintf(buffer, n, "%4d ", (int)val);
+      }
+   } else {
+      *attr = CRT_colors[PROCESS_SHADOW];
+      xSnprintf(buffer, n, " N/A ");
+   }
+}
+
+static inline char processStateChar(ProcessState state) {
+   switch (state) {
+      case UNKNOWN: return '?';
+      case RUNNABLE: return 'U';
+      case RUNNING: return 'R';
+      case QUEUED: return 'Q';
+      case WAITING: return 'W';
+      case UNINTERRUPTIBLE_WAIT: return 'D';
+      case BLOCKED: return 'B';
+      case PAGING: return 'P';
+      case STOPPED: return 'T';
+      case TRACED: return 't';
+      case ZOMBIE: return 'Z';
+      case DEFUNCT: return 'X';
+      case IDLE: return 'I';
+      case SLEEPING: return 'S';
+      default:
+         assert(0);
+         return '!';
+   }
+}
+
 void Process_writeField(const Process* this, RichString* str, ProcessField field) {
    char buffer[256];
    size_t n = sizeof(buffer);
@@ -716,7 +784,8 @@ void Process_writeField(const Process* this, RichString* str, ProcessField field
          attr = CRT_colors[PROCESS_THREAD];
          baseattr = CRT_colors[PROCESS_THREAD_BASENAME];
       }
-      if (!this->settings->treeView || this->indent == 0) {
+      const ScreenSettings* ss = this->settings->ss;
+      if (!ss->treeView || this->indent == 0) {
          Process_writeCommand(this, attr, baseattr, str);
          return;
       }
@@ -817,34 +886,13 @@ void Process_writeField(const Process* this, RichString* str, ProcessField field
 
       xSnprintf(buffer, n, "%4ld ", this->nlwp);
       break;
-   case PERCENT_CPU:
+   case PERCENT_CPU: Process_printPercentage(this->percent_cpu, buffer, n, &attr); break;
    case PERCENT_NORM_CPU: {
-      float cpuPercentage = this->percent_cpu;
-      if (field == PERCENT_NORM_CPU) {
-         cpuPercentage /= this->processList->cpuCount;
-      }
-      if (cpuPercentage > 999.9F) {
-         xSnprintf(buffer, n, "%4u ", (unsigned int)cpuPercentage);
-      } else if (cpuPercentage > 99.9F) {
-         xSnprintf(buffer, n, "%3u. ", (unsigned int)cpuPercentage);
-      } else {
-         if (cpuPercentage < 0.05F)
-            attr = CRT_colors[PROCESS_SHADOW];
-
-         xSnprintf(buffer, n, "%4.1f ", cpuPercentage);
-      }
+      float cpuPercentage = this->percent_cpu / this->processList->activeCPUs;
+      Process_printPercentage(cpuPercentage, buffer, n, &attr);
       break;
    }
-   case PERCENT_MEM:
-      if (this->percent_mem > 99.9F) {
-         xSnprintf(buffer, n, "100. ");
-      } else {
-         if (this->percent_mem < 0.05F)
-            attr = CRT_colors[PROCESS_SHADOW];
-
-         xSnprintf(buffer, n, "%4.1f ", this->percent_mem);
-      }
-      break;
+   case PERCENT_MEM: Process_printPercentage(this->percent_mem, buffer, n, &attr); break;
    case PGRP: xSnprintf(buffer, n, "%*d ", Process_pidDigits, this->pgrp); break;
    case PID: xSnprintf(buffer, n, "%*d ", Process_pidDigits, this->pid); break;
    case PPID: xSnprintf(buffer, n, "%*d ", Process_pidDigits, this->ppid); break;
@@ -858,21 +906,35 @@ void Process_writeField(const Process* this, RichString* str, ProcessField field
    case SESSION: xSnprintf(buffer, n, "%*d ", Process_pidDigits, this->session); break;
    case STARTTIME: xSnprintf(buffer, n, "%s", this->starttime_show); break;
    case STATE:
-      xSnprintf(buffer, n, "%c ", this->state);
+      xSnprintf(buffer, n, "%c ", processStateChar(this->state));
       switch (this->state) {
-         case 'R':
-            attr = CRT_colors[PROCESS_R_STATE];
+         case RUNNABLE:
+         case RUNNING:
+         case TRACED:
+            attr = CRT_colors[PROCESS_RUN_STATE];
             break;
-         case 'D':
+
+         case BLOCKED:
+         case DEFUNCT:
+         case STOPPED:
+         case UNINTERRUPTIBLE_WAIT:
+         case ZOMBIE:
             attr = CRT_colors[PROCESS_D_STATE];
             break;
-         case 'I':
-         case 'S':
+
+         case QUEUED:
+         case WAITING:
+         case IDLE:
+         case SLEEPING:
             attr = CRT_colors[PROCESS_SHADOW];
+            break;
+
+         case UNKNOWN:
+         case PAGING:
             break;
       }
       break;
-   case ST_UID: xSnprintf(buffer, n, "%5d ", this->st_uid); break;
+   case ST_UID: xSnprintf(buffer, n, "%*d ", Process_uidDigits, this->st_uid); break;
    case TIME: Process_printTime(str, this->time, coloring); return;
    case TGID:
       if (this->tgid == this->pid)
@@ -895,22 +957,25 @@ void Process_writeField(const Process* this, RichString* str, ProcessField field
          attr = CRT_colors[PROCESS_SHADOW];
 
       if (this->user) {
-         Process_printLeftAlignedField(str, attr, this->user, 9);
+         Process_printLeftAlignedField(str, attr, this->user, 10);
          return;
       }
 
-      xSnprintf(buffer, n, "%-9d ", this->st_uid);
+      xSnprintf(buffer, n, "%-10d ", this->st_uid);
       break;
    default:
+      if (DynamicColumn_writeField(this, str, field))
+         return;
       assert(0 && "Process_writeField: default key reached"); /* should never be reached */
       xSnprintf(buffer, n, "- ");
+      break;
    }
    RichString_appendAscii(str, attr, buffer);
 }
 
 void Process_display(const Object* cast, RichString* out) {
    const Process* this = (const Process*) cast;
-   const ProcessField* fields = this->settings->fields;
+   const ProcessField* fields = this->settings->ss->fields;
    for (int i = 0; fields[i]; i++)
       As_Process(this)->writeField(this, out, fields[i]);
 
@@ -946,7 +1011,7 @@ void Process_done(Process* this) {
 /* This function returns the string displayed in Command column, so that sorting
  * happens on what is displayed - whether comm, full path, basename, etc.. So
  * this follows Process_writeField(COMM) and Process_writeCommand */
-const char* Process_getCommandStr(const Process* this) {
+const char* Process_getCommand(const Process* this) {
    if ((Process_isUserlandThread(this) && this->settings->showThreadNames) || !this->mergedCommand.str) {
       return this->cmdline;
    }
@@ -962,7 +1027,6 @@ const ProcessClass Process_class = {
       .compare = Process_compare
    },
    .writeField = Process_writeField,
-   .getCommandStr = Process_getCommandStr,
 };
 
 void Process_init(Process* this, const Settings* settings) {
@@ -1028,8 +1092,9 @@ int Process_compare(const void* v1, const void* v2) {
    const Process* p2 = (const Process*)v2;
 
    const Settings* settings = p1->settings;
+   const ScreenSettings* ss = settings->ss;
 
-   ProcessField key = Settings_getActiveSortKey(settings);
+   ProcessField key = ScreenSettings_getActiveSortKey(ss);
 
    int result = Process_compareByKey(p1, p2, key);
 
@@ -1037,45 +1102,7 @@ int Process_compare(const void* v1, const void* v2) {
    if (!result)
       return SPACESHIP_NUMBER(p1->pid, p2->pid);
 
-   return (Settings_getActiveDirection(settings) == 1) ? result : -result;
-}
-
-static uint8_t stateCompareValue(char state) {
-   switch (state) {
-
-   case 'S':
-      return 10;
-
-   case 'I':
-      return 9;
-
-   case 'X':
-      return 8;
-
-   case 'Z':
-      return 7;
-
-   case 't':
-      return 6;
-
-   case 'T':
-      return 5;
-
-   case 'L':
-      return 4;
-
-   case 'D':
-      return 3;
-
-   case 'R':
-      return 2;
-
-   case '?':
-      return 1;
-
-   default:
-      return 0;
-   }
+   return (ScreenSettings_getActiveDirection(ss) == 1) ? result : -result;
 }
 
 int Process_compareByKey_Base(const Process* p1, const Process* p2, ProcessField key) {
@@ -1132,7 +1159,7 @@ int Process_compareByKey_Base(const Process* p1, const Process* p2, ProcessField
       r = SPACESHIP_NUMBER(p1->starttime_ctime, p2->starttime_ctime);
       return r != 0 ? r : SPACESHIP_NUMBER(p1->pid, p2->pid);
    case STATE:
-      return SPACESHIP_NUMBER(stateCompareValue(p1->state), stateCompareValue(p2->state));
+      return SPACESHIP_NUMBER(p1->state, p2->state);
    case ST_UID:
       return SPACESHIP_NUMBER(p1->st_uid, p2->st_uid);
    case TIME:
@@ -1147,6 +1174,7 @@ int Process_compareByKey_Base(const Process* p1, const Process* p2, ProcessField
    case USER:
       return SPACESHIP_NULLSTR(p1->user, p2->user);
    default:
+      CRT_debug("Process_compareByKey_Base() called with key %d", key);
       assert(0 && "Process_compareByKey_Base: default key reached"); /* should never be reached */
       return SPACESHIP_NUMBER(p1->pid, p2->pid);
    }
