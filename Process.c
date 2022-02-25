@@ -417,7 +417,7 @@ void Process_makeCommandStr(Process* this) {
       return;
    if (this->state == ZOMBIE && !this->mergedCommand.str)
       return;
-   if (Process_isUserlandThread(this) && settings->showThreadNames && (showThreadNames == mc->prevShowThreadNames))
+   if (Process_isUserlandThread(this) && settings->showThreadNames && (showThreadNames == mc->prevShowThreadNames) && (mc->prevMergeSet == showMergedCommand))
       return;
 
    /* this->mergedCommand.str needs updating only if its state or contents changed.
@@ -516,10 +516,13 @@ void Process_makeCommandStr(Process* this) {
    assert(cmdlineBasenameStart <= (int)strlen(cmdline));
 
    if (!showMergedCommand || !procExe || !procComm) { /* fall back to cmdline */
-      if (showMergedCommand && (!Process_isUserlandThread(this) || showThreadNames) && !procExe && procComm && strlen(procComm)) { /* Prefix column with comm */
+      if ((showMergedCommand || (Process_isUserlandThread(this) && showThreadNames)) && procComm && strlen(procComm)) { /* set column to or prefix it with comm */
          if (strncmp(cmdline + cmdlineBasenameStart, procComm, MINIMUM(TASK_COMM_LEN - 1, strlen(procComm))) != 0) {
             WRITE_HIGHLIGHT(0, strlen(procComm), commAttr, CMDLINE_HIGHLIGHT_FLAG_COMM);
             str = stpcpy(str, procComm);
+
+            if(!showMergedCommand)
+               return;
 
             WRITE_SEPARATOR;
          }
@@ -736,12 +739,11 @@ void Process_printPercentage(float val, char* buffer, int n, int* attr) {
             *attr = CRT_colors[PROCESS_SHADOW];
          }
          xSnprintf(buffer, n, "%4.1f ", val);
-      } else if (val < 999) {
-         *attr = CRT_colors[PROCESS_MEGABYTES];
-         xSnprintf(buffer, n, "%3d. ", (int)val);
       } else {
          *attr = CRT_colors[PROCESS_MEGABYTES];
-         xSnprintf(buffer, n, "%4d ", (int)val);
+         if (val < 100.0F)
+            val = 100.0F; // Don't round down and display "val" as "99".
+         xSnprintf(buffer, n, "%4.0f ", val);
       }
    } else {
       *attr = CRT_colors[PROCESS_SHADOW];

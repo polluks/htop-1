@@ -250,10 +250,10 @@ typedef struct Process_ {
     * Internal state for tree-mode.
     */
    int indent;
-   unsigned int tree_left;
-   unsigned int tree_right;
    unsigned int tree_depth;
-   unsigned int tree_index;
+
+   /* Has no known parent process */
+   bool isRoot;
 
    /*
     * Internal state for merged Command display
