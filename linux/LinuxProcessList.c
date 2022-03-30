@@ -902,16 +902,27 @@ static void LinuxProcessList_readCGroupFile(LinuxProcess* process, openat_arg_t 
 
    bool changed = !process->cgroup || !String_eq(process->cgroup, output);
 
+   Process_updateFieldWidth(CGROUP, strlen(output));
    free_and_xStrdup(&process->cgroup, output);
 
-   if (!changed)
+   if (!changed) {
+      if(process->cgroup_short) {
+         Process_updateFieldWidth(CCGROUP, strlen(process->cgroup_short));
+      } else {
+         //CCGROUP is alias to normal CGROUP if shortening fails
+         Process_updateFieldWidth(CCGROUP, strlen(process->cgroup));
+      }
       return;
+   }
 
    char* cgroup_short = CGroup_filterName(process->cgroup);
    if (cgroup_short) {
+      Process_updateFieldWidth(CCGROUP, strlen(cgroup_short));
       free_and_xStrdup(&process->cgroup_short, cgroup_short);
       free(cgroup_short);
    } else {
+      //CCGROUP is alias to normal CGROUP if shortening fails
+      Process_updateFieldWidth(CCGROUP, strlen(process->cgroup));
       free(process->cgroup_short);
       process->cgroup_short = NULL;
    }
@@ -1029,6 +1040,9 @@ static void LinuxProcessList_readSecattrData(LinuxProcess* process, openat_arg_t
    if (newline) {
       *newline = '\0';
    }
+
+   Process_updateFieldWidth(SECATTR, strlen(buffer));
+
    if (process->secattr && String_eq(process->secattr, buffer)) {
       return;
    }
@@ -1534,6 +1548,7 @@ static bool LinuxProcessList_recurseProcTree(LinuxProcessList* this, openat_arg_
       float percent_cpu = (period < 1E-6) ? 0.0F : ((lp->utime + lp->stime - lasttimes) / period * 100.0);
       proc->percent_cpu = CLAMP(percent_cpu, 0.0F, activeCPUs * 100.0F);
       proc->percent_mem = proc->m_resident / (double)(pl->totalMem) * 100.0;
+      Process_updateCPUFieldWidths(proc->percent_cpu);
 
       if (! LinuxProcessList_updateUser(pl, proc, procFd))
          goto errorReadingProcess;
