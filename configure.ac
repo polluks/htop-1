@@ -6,13 +6,13 @@
 # ----------------------------------------------------------------------
 
 AC_PREREQ([2.69])
-AC_INIT([htop], [3.2.0-dev], [htop@groups.io], [], [https://htop.dev/])
+AC_INIT([htop], [3.2.1], [htop@groups.io], [], [https://htop.dev/])
 
 AC_CONFIG_SRCDIR([htop.c])
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_HEADERS([config.h])
 
-AC_CANONICAL_TARGET
+AC_CANONICAL_HOST
 AM_INIT_AUTOMAKE([-Wall std-options subdir-objects])
 
 # ----------------------------------------------------------------------
@@ -22,7 +22,7 @@ AM_INIT_AUTOMAKE([-Wall std-options subdir-objects])
 # Checks for platform.
 # ----------------------------------------------------------------------
 
-case "$target_os" in
+case "$host_os" in
 linux*|gnu*)
    my_htop_platform=linux
    AC_DEFINE([HTOP_LINUX], [], [Building for Linux.])

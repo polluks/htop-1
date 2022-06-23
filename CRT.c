@@ -900,6 +900,20 @@ void CRT_resetSignalHandlers(void) {
    signal(SIGQUIT, SIG_DFL);
 }
 
+void CRT_setMouse(bool enabled) {
+#ifdef HAVE_GETMOUSE
+   if (enabled) {
+#if NCURSES_MOUSE_VERSION > 1
+      mousemask(BUTTON1_RELEASED | BUTTON4_PRESSED | BUTTON5_PRESSED, NULL);
+#else
+      mousemask(BUTTON1_RELEASED, NULL);
+#endif
+   } else {
+      mousemask(0, NULL);
+   }
+#endif
+}
+
 void CRT_init(const Settings* settings, bool allowUnicode) {
    redirectStderr();
 
@@ -993,21 +1007,17 @@ IGNORE_WCASTQUAL_END
 #endif
       CRT_treeStrAscii;
 
-#ifdef HAVE_GETMOUSE
-#if NCURSES_MOUSE_VERSION > 1
-   mousemask(BUTTON1_RELEASED | BUTTON4_PRESSED | BUTTON5_PRESSED, NULL);
-#else
-   mousemask(BUTTON1_RELEASED, NULL);
-#endif
-#endif
+   CRT_setMouse(settings->enableMouse);
 
    CRT_degreeSign = initDegreeSign();
 }
 
 void CRT_done() {
-   attron(CRT_colors[RESET_COLOR]);
+   int resetColor = CRT_colors ? CRT_colors[RESET_COLOR] : CRT_colorSchemes[COLORSCHEME_DEFAULT][RESET_COLOR];
+
+   attron(resetColor);
    mvhline(LINES - 1, 0, ' ', COLS);
-   attroff(CRT_colors[RESET_COLOR]);
+   attroff(resetColor);
    refresh();
 
    curs_set(1);
