@@ -10,6 +10,7 @@ in the source distribution for its full text.
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
+#include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -381,6 +382,8 @@ static bool Settings_read(Settings* this, const char* fileName, unsigned int ini
          this->hideKernelThreads = atoi(option[1]);
       } else if (String_eq(option[0], "hide_userland_threads")) {
          this->hideUserlandThreads = atoi(option[1]);
+      } else if (String_eq(option[0], "hide_running_in_container")) {
+         this->hideRunningInContainer = atoi(option[1]);
       } else if (String_eq(option[0], "shadow_other_users")) {
          this->shadowOtherUsers = atoi(option[1]);
       } else if (String_eq(option[0], "show_thread_names")) {
@@ -575,6 +578,7 @@ int Settings_write(const Settings* this, bool onCrash) {
    fprintf(fd, "fields="); writeFields(fd, this->screens[0]->fields, this->dynamicColumns, false, separator);
    printSettingInteger("hide_kernel_threads", this->hideKernelThreads);
    printSettingInteger("hide_userland_threads", this->hideUserlandThreads);
+   printSettingInteger("hide_running_in_container", this->hideRunningInContainer);
    printSettingInteger("shadow_other_users", this->shadowOtherUsers);
    printSettingInteger("show_thread_names", this->showThreadNames);
    printSettingInteger("show_program_path", this->showProgramPath);
@@ -668,6 +672,7 @@ Settings* Settings_new(unsigned int initialCpuCount, Hashtable* dynamicColumns) 
    this->showThreadNames = false;
    this->hideKernelThreads = true;
    this->hideUserlandThreads = false;
+   this->hideRunningInContainer = false;
    this->highlightBaseName = false;
    this->highlightDeletedExe = true;
    this->highlightMegabytes = true;
@@ -702,9 +707,10 @@ Settings* Settings_new(unsigned int initialCpuCount, Hashtable* dynamicColumns) 
       this->filename = xStrdup(rcfile);
    } else {
       const char* home = getenv("HOME");
-      if (!home)
-         home = "";
-
+      if (!home) {
+         const struct passwd* pw = getpwuid(getuid());
+         home = pw ? pw->pw_dir : "";
+      }
       const char* xdgConfigHome = getenv("XDG_CONFIG_HOME");
       char* configDir = NULL;
       char* htopDir = NULL;

@@ -134,6 +134,9 @@ typedef struct Process_ {
    /* This is a userland thread / LWP */
    bool isUserlandThread;
 
+   /* This process is running inside a container */
+   bool isRunningInContainer;
+
    /* Controlling terminal identifier of the process */
    unsigned long int tty_nr;
 
@@ -242,7 +245,7 @@ typedef struct Process_ {
    /*
     * Internal state for tree-mode.
     */
-   int indent;
+   int32_t indent;
    unsigned int tree_depth;
 
    /* Has no known parent process */

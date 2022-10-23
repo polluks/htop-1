@@ -212,7 +212,7 @@ AC_RUN_IFELSE([
 # Checks for generic library functions.
 # ----------------------------------------------------------------------
 
-AC_CHECK_LIB([m], [ceil], [], [AC_MSG_ERROR([can not find required function ceil()])])
+AC_SEARCH_LIBS([ceil], [m], [], [AC_MSG_ERROR([can not find required function ceil()])])
 
 if test "$my_htop_platform" = dragonflybsd; then
    AC_SEARCH_LIBS([kvm_open], [kvm], [], [AC_MSG_ERROR([can not find required function kvm_open()])])
@@ -264,6 +264,10 @@ AC_CHECK_FUNCS([ \
 
 if test "$my_htop_platform" = darwin; then
    AC_CHECK_FUNCS([mach_timebase_info])
+fi
+
+if test "$my_htop_platform" = pcp; then
+   AC_CHECK_FUNCS([pmLookupDescs])
 fi
 
 if test "$my_htop_platform" = linux && test "x$enable_static" = xyes; then

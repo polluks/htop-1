@@ -834,7 +834,7 @@ static void dumpStderr(void) {
             fprintf(stderr, ">>>>>>>>>> stderr output >>>>>>>>>>\n");
             header = true;
          }
-         (void)! write(STDERR_FILENO, buffer, res);
+         full_write(STDERR_FILENO, buffer, res);
       }
    }
 
@@ -900,8 +900,8 @@ void CRT_resetSignalHandlers(void) {
    signal(SIGQUIT, SIG_DFL);
 }
 
-void CRT_setMouse(bool enabled) {
 #ifdef HAVE_GETMOUSE
+void CRT_setMouse(bool enabled) {
    if (enabled) {
 #if NCURSES_MOUSE_VERSION > 1
       mousemask(BUTTON1_RELEASED | BUTTON4_PRESSED | BUTTON5_PRESSED, NULL);
@@ -911,13 +911,12 @@ void CRT_setMouse(bool enabled) {
    } else {
       mousemask(0, NULL);
    }
-#endif
 }
+#endif
 
 void CRT_init(const Settings* settings, bool allowUnicode) {
-   redirectStderr();
-
    initscr();
+   redirectStderr();
    noecho();
    CRT_crashSettings = settings;
    CRT_delay = &(settings->delay);
@@ -1012,7 +1011,7 @@ IGNORE_WCASTQUAL_END
    CRT_degreeSign = initDegreeSign();
 }
 
-void CRT_done() {
+void CRT_done(void) {
    int resetColor = CRT_colors ? CRT_colors[RESET_COLOR] : CRT_colorSchemes[COLORSCHEME_DEFAULT][RESET_COLOR];
 
    attron(resetColor);
@@ -1033,7 +1032,7 @@ void CRT_fatalError(const char* note) {
    exit(2);
 }
 
-int CRT_readKey() {
+int CRT_readKey(void) {
    nocbreak();
    cbreak();
    nodelay(stdscr, FALSE);
@@ -1042,13 +1041,13 @@ int CRT_readKey() {
    return ret;
 }
 
-void CRT_disableDelay() {
+void CRT_disableDelay(void) {
    nocbreak();
    cbreak();
    nodelay(stdscr, TRUE);
 }
 
-void CRT_enableDelay() {
+void CRT_enableDelay(void) {
    halfdelay(*CRT_delay);
 }
 
