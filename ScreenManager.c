@@ -115,7 +115,7 @@ void ScreenManager_resize(ScreenManager* this) {
    Panel_move(panel, lastX, y1_header);
 }
 
-static void checkRecalculation(ScreenManager* this, double* oldTime, int* sortTimeout, bool* redraw, bool* rescan, bool* timedOut, bool *force_redraw) {
+static void checkRecalculation(ScreenManager* this, double* oldTime, int* sortTimeout, bool* redraw, bool* rescan, bool* timedOut, bool* force_redraw) {
    ProcessList* pl = this->header->pl;
 
    Platform_gettime_realtime(&pl->realtime, &pl->realtimeMs);
@@ -153,7 +153,7 @@ static void checkRecalculation(ScreenManager* this, double* oldTime, int* sortTi
    *rescan = false;
 }
 
-static inline bool drawTab(int* y, int* x, int l, const char* name, bool cur) {
+static inline bool drawTab(const int* y, int* x, int l, const char* name, bool cur) {
    attrset(CRT_colors[cur ? SCREENS_CUR_BORDER : SCREENS_OTH_BORDER]);
    mvaddch(*y, *x, '[');
    (*x)++;
