@@ -208,7 +208,7 @@ void Process_printTime(RichString* str, unsigned long long totalHundredths, bool
    int hourColor = coloring ? CRT_colors[PROCESS_MEGABYTES] : CRT_colors[PROCESS];
    int defColor  = CRT_colors[PROCESS];
 
-   if (days >= /* Ignore leapyears */365) {
+   if (days >= /* Ignore leap years */365) {
       int years = days / 365;
       int daysLeft = days - 365 * years;
 
@@ -274,8 +274,13 @@ void Process_printTime(RichString* str, unsigned long long totalHundredths, bool
 
 void Process_fillStarttimeBuffer(Process* this) {
    struct tm date;
+   time_t now = this->host->realtime.tv_sec;
    (void) localtime_r(&this->starttime_ctime, &date);
-   strftime(this->starttime_show, sizeof(this->starttime_show) - 1, (this->starttime_ctime > (time(NULL) - 86400)) ? "%R " : "%b%d ", &date);
+
+   strftime(this->starttime_show,
+            sizeof(this->starttime_show) - 1,
+            (this->starttime_ctime > now - 86400) ? "%R " : (this->starttime_ctime > now - 364*86400) ? "%b%d " : " %Y ",
+            &date);
 }
 
 /*
@@ -287,7 +292,7 @@ void Process_fillStarttimeBuffer(Process* this) {
  *
  * Note: when colorizing a basename with the comm prefix, the entire basename
  * (not just the comm prefix) is colorized for better readability, and it is
- * implicit that only upto (TASK_COMM_LEN - 1) could be comm.
+ * implicit that only up to (TASK_COMM_LEN - 1) could be comm.
  */
 #define TASK_COMM_LEN 16
 
@@ -407,7 +412,7 @@ static inline char* stpcpyWithNewlineConversion(char* dstStr, const char* srcStr
  */
 void Process_makeCommandStr(Process* this) {
    ProcessMergedCommand* mc = &this->mergedCommand;
-   const Settings* settings = this->settings;
+   const Settings* settings = this->host->settings;
 
    bool showMergedCommand = settings->showMergedCommand;
    bool showProgramPath = settings->showProgramPath;
@@ -434,7 +439,7 @@ void Process_makeCommandStr(Process* this) {
 
    mc->lastUpdate = settingsStamp;
 
-   /* The field separtor "│" has been chosen such that it will not match any
+   /* The field separator "│" has been chosen such that it will not match any
     * valid string used for searching or filtering */
    const char* SEPARATOR = CRT_treeStr[TREE_STR_VERT];
    const int SEPARATOR_LEN = strlen(SEPARATOR);
@@ -675,15 +680,16 @@ void Process_writeCommand(const Process* this, int attr, int baseAttr, RichStrin
 
    int strStart = RichString_size(str);
 
-   const bool highlightBaseName = this->settings->highlightBaseName;
+   const Settings* settings = this->host->settings;
+   const bool highlightBaseName = settings->highlightBaseName;
    const bool highlightSeparator = true;
-   const bool highlightDeleted = this->settings->highlightDeletedExe;
+   const bool highlightDeleted = settings->highlightDeletedExe;
 
    if (!mergedCommand) {
       int len = 0;
       const char* cmdline = this->cmdline;
 
-      if (highlightBaseName || !this->settings->showProgramPath) {
+      if (highlightBaseName || !settings->showProgramPath) {
          int basename = 0;
          for (int i = 0; i < this->cmdlineBasenameEnd; i++) {
             if (cmdline[i] == '/') {
@@ -694,7 +700,7 @@ void Process_writeCommand(const Process* this, int attr, int baseAttr, RichStrin
             }
          }
          if (len == 0) {
-            if (this->settings->showProgramPath) {
+            if (settings->showProgramPath) {
                strStart += basename;
             } else {
                cmdline += basename;
@@ -705,7 +711,7 @@ void Process_writeCommand(const Process* this, int attr, int baseAttr, RichStrin
 
       RichString_appendWide(str, attr, cmdline);
 
-      if (this->settings->highlightBaseName) {
+      if (settings->highlightBaseName) {
          RichString_setAttrn(str, baseAttr, strStart, len);
       }
 
@@ -833,16 +839,17 @@ void Process_writeField(const Process* this, RichString* str, ProcessField field
    char buffer[256];
    size_t n = sizeof(buffer);
    int attr = CRT_colors[DEFAULT_COLOR];
-   bool coloring = this->settings->highlightMegabytes;
+   const Settings* settings = this->host->settings;
+   bool coloring = settings->highlightMegabytes;
 
    switch (field) {
    case COMM: {
       int baseattr = CRT_colors[PROCESS_BASENAME];
-      if (this->settings->highlightThreads && Process_isThread(this)) {
+      if (settings->highlightThreads && Process_isThread(this)) {
          attr = CRT_colors[PROCESS_THREAD];
          baseattr = CRT_colors[PROCESS_THREAD_BASENAME];
       }
-      const ScreenSettings* ss = this->settings->ss;
+      const ScreenSettings* ss = settings->ss;
       if (!ss->treeView || this->indent == 0) {
          Process_writeCommand(this, attr, baseattr, str);
          return;
@@ -890,7 +897,7 @@ void Process_writeField(const Process* this, RichString* str, ProcessField field
       const char* procExe;
       if (this->procExe) {
          attr = CRT_colors[Process_isUserlandThread(this) ? PROCESS_THREAD_BASENAME : PROCESS_BASENAME];
-         if (this->settings->highlightDeletedExe) {
+         if (settings->highlightDeletedExe) {
             if (this->procExeDeleted)
                attr = CRT_colors[FAILED_READ];
             else if (this->usesDeletedLib)
@@ -920,7 +927,7 @@ void Process_writeField(const Process* this, RichString* str, ProcessField field
       return;
    }
    case ELAPSED: {
-      const uint64_t rt = this->processList->realtimeMs;
+      const uint64_t rt = this->host->realtimeMs;
       const uint64_t st = this->starttime_ctime * 1000;
       const uint64_t dt =
          rt < st ? 0 :
@@ -946,7 +953,7 @@ void Process_writeField(const Process* this, RichString* str, ProcessField field
       break;
    case PERCENT_CPU: Process_printPercentage(this->percent_cpu, buffer, n, Process_fieldWidths[PERCENT_CPU], &attr); break;
    case PERCENT_NORM_CPU: {
-      float cpuPercentage = this->percent_cpu / this->processList->activeCPUs;
+      float cpuPercentage = this->percent_cpu / this->host->activeCPUs;
       Process_printPercentage(cpuPercentage, buffer, n, Process_fieldWidths[PERCENT_CPU], &attr);
       break;
    }
@@ -960,7 +967,7 @@ void Process_writeField(const Process* this, RichString* str, ProcessField field
       else
          xSnprintf(buffer, n, "%3ld ", this->priority);
       break;
-   case PROCESSOR: xSnprintf(buffer, n, "%3d ", Settings_cpuId(this->settings, this->processor)); break;
+   case PROCESSOR: xSnprintf(buffer, n, "%3d ", Settings_cpuId(settings, this->processor)); break;
    case SCHEDULERPOLICY: {
       const char* schedPolStr = "N/A";
 #ifdef SCHEDULER_SUPPORT
@@ -1044,11 +1051,12 @@ void Process_writeField(const Process* this, RichString* str, ProcessField field
 
 void Process_display(const Object* cast, RichString* out) {
    const Process* this = (const Process*) cast;
-   const ProcessField* fields = this->settings->ss->fields;
+   const Settings* settings = this->host->settings;
+   const ProcessField* fields = settings->ss->fields;
    for (int i = 0; fields[i]; i++)
       As_Process(this)->writeField(this, out, fields[i]);
 
-   if (this->settings->shadowOtherUsers && this->st_uid != Process_getuid) {
+   if (settings->shadowOtherUsers && this->st_uid != Process_getuid) {
       RichString_setAttr(out, CRT_colors[PROCESS_SHADOW]);
    }
 
@@ -1056,7 +1064,7 @@ void Process_display(const Object* cast, RichString* out) {
       RichString_setAttr(out, CRT_colors[PROCESS_TAG]);
    }
 
-   if (this->settings->highlightChanges) {
+   if (settings->highlightChanges) {
       if (Process_isTomb(this)) {
          out->highlightAttr = CRT_colors[PROCESS_TOMB];
       } else if (Process_isNew(this)) {
@@ -1081,7 +1089,8 @@ void Process_done(Process* this) {
  * happens on what is displayed - whether comm, full path, basename, etc.. So
  * this follows Process_writeField(COMM) and Process_writeCommand */
 const char* Process_getCommand(const Process* this) {
-   if ((Process_isUserlandThread(this) && this->settings->showThreadNames) || !this->mergedCommand.str) {
+   const Settings* settings = this->host->settings;
+   if ((Process_isUserlandThread(this) && settings->showThreadNames) || !this->mergedCommand.str) {
       return this->cmdline;
    }
 
@@ -1098,8 +1107,8 @@ const ProcessClass Process_class = {
    .writeField = Process_writeField,
 };
 
-void Process_init(Process* this, const Settings* settings) {
-   this->settings = settings;
+void Process_init(Process* this, const Machine* host) {
+   this->host = host;
    this->tag = false;
    this->showChildren = true;
    this->show = true;
@@ -1117,9 +1126,11 @@ void Process_toggleTag(Process* this) {
 }
 
 bool Process_isNew(const Process* this) {
-   assert(this->processList);
-   if (this->processList->monotonicMs >= this->seenStampMs) {
-      return this->processList->monotonicMs - this->seenStampMs <= 1000 * (uint64_t)this->processList->settings->highlightDelaySecs;
+   assert(this->host);
+   const Machine* host = this->host;
+   if (host->monotonicMs >= this->seenStampMs) {
+      const Settings* settings = host->settings;
+      return host->monotonicMs - this->seenStampMs <= 1000 * (uint64_t)settings->highlightDelaySecs;
    }
    return false;
 }
@@ -1153,7 +1164,7 @@ int Process_compare(const void* v1, const void* v2) {
    const Process* p1 = (const Process*)v1;
    const Process* p2 = (const Process*)v2;
 
-   const Settings* settings = p1->settings;
+   const Settings* settings = p1->host->settings;
    const ScreenSettings* ss = settings->ss;
 
    ProcessField key = ScreenSettings_getActiveSortKey(ss);

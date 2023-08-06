@@ -280,6 +280,8 @@ AC_CHECK_FUNCS([ \
 
 if test "$my_htop_platform" = darwin; then
    AC_CHECK_FUNCS([mach_timebase_info])
+   AC_CHECK_DECLS([IOMainPort], [], [], [[#include <IOKit/IOKitLib.h>]])
+   AC_CHECK_DECLS([IOMasterPort], [], [], [[#include <IOKit/IOKitLib.h>]])
 fi
 
 if test "$my_htop_platform" = pcp; then
@@ -358,6 +360,11 @@ if test "x$enable_unicode" = xyes; then
             [AC_CHECK_HEADERS([ncurses.h], [],
                [AC_MSG_ERROR([can not find required ncurses header file])])])])])
 
+   AC_CHECK_HEADERS([ncursesw/term.h], [],
+      [AC_CHECK_HEADERS([ncurses/term.h], [],
+         [AC_CHECK_HEADERS([term.h], [],
+            [AC_MSG_ERROR([can not find required term header file])])])])
+
    # check if additional linker flags are needed for keypad(3)
    # (at this point we already link against a working ncurses library with wide character support)
    AC_SEARCH_LIBS([keypad], [tinfow tinfo])
@@ -373,13 +380,18 @@ else
    AC_CHECK_HEADERS([curses.h], [],
       [AC_CHECK_HEADERS([ncurses/curses.h], [],
          [AC_CHECK_HEADERS([ncurses/ncurses.h], [],
-            [AC_CHECK_HEADERS([ncurses.h] ,[],
+            [AC_CHECK_HEADERS([ncurses.h], [],
                [AC_MSG_ERROR([can not find required ncurses header file])])])])])
+
+   AC_CHECK_HEADERS([ncurses/term.h], [],
+      [AC_CHECK_HEADERS([term.h], [],
+         [AC_MSG_ERROR([can not find required term header file])])])
 
    # check if additional linker flags are needed for keypad(3)
    # (at this point we already link against a working ncurses library)
    AC_SEARCH_LIBS([keypad], [tinfo])
 fi
+
 if test "$enable_static" = yes; then
    AC_SEARCH_LIBS([Gpm_GetEvent], [gpm])
 fi
@@ -479,7 +491,9 @@ case "$enable_hwloc" in
       m4_ifdef([PKG_PROG_PKG_CONFIG], [
          PKG_PROG_PKG_CONFIG()
          PKG_CHECK_MODULES(HWLOC, hwloc, [
-               CFLAGS="$CFLAGS $HWLOC_CFLAGS" LIBS="$LIBS $HWLOC_LIBS"
+               CFLAGS="$CFLAGS $HWLOC_CFLAGS"
+               LIBS="$LIBS $HWLOC_LIBS"
+               AC_DEFINE([HAVE_LIBHWLOC], [1], [Define to 1 if you have the `hwloc' library (-lhwloc).])
             ], [
                AC_CHECK_LIB([hwloc], [hwloc_get_proc_cpubind], [], [AC_MSG_ERROR([can not find required library libhwloc])])
                AC_CHECK_HEADERS([hwloc.h], [], [AC_MSG_ERROR([can not find require header file hwloc.h])])
