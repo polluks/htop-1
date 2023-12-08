@@ -606,6 +606,9 @@ static void LinuxProcessTable_readMaps(LinuxProcess* process, openat_arg_t procF
       if (' ' != *readptr++)
          continue;
 
+      if (!readptr[0] || !readptr[1] || !readptr[2] || !readptr[3])
+         continue;
+
       map_execute = (readptr[2] == 'x');
       readptr += 4;
       if (' ' != *readptr++)
@@ -698,6 +701,8 @@ static bool LinuxProcessTable_readStatmFile(LinuxProcess* process, openat_arg_t 
    if (r == 7) {
       process->super.m_virt *= host->pageSizeKB;
       process->super.m_resident *= host->pageSizeKB;
+
+      process->m_priv = process->super.m_resident - (process->m_share * host->pageSizeKB);
    }
 
    return r == 7;
@@ -856,13 +861,13 @@ static void LinuxProcessTable_readCGroupFile(LinuxProcess* process, openat_arg_t
 
       char* group = buffer;
       for (size_t i = 0; i < 2; i++) {
-         group = strchrnul(group, ':');
+         group = String_strchrnul(group, ':');
          if (!*group)
             break;
          group++;
       }
 
-      char* eol = strchrnul(group, '\n');
+      char* eol = String_strchrnul(group, '\n');
       *eol = '\0';
 
       if (at != output) {

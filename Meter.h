@@ -20,7 +20,7 @@ in the source distribution for its full text.
 
 
 #define METER_TXTBUFFER_LEN 256
-#define METER_GRAPHDATA_SIZE 256
+#define MAX_METER_GRAPHDATA_VALUES 32768
 
 #define METER_BUFFER_CHECK(buffer, size, written)          \
    do {                                                    \
@@ -97,7 +97,8 @@ typedef struct MeterClass_ {
 
 typedef struct GraphData_ {
    struct timeval time;
-   double values[METER_GRAPHDATA_SIZE];
+   size_t nValues;
+   double* values;
 } GraphData;
 
 struct Meter_ {
@@ -108,7 +109,7 @@ struct Meter_ {
    char* caption;
    int mode;
    unsigned int param;
-   GraphData* drawData;
+   GraphData drawData;
    int h;
    int columnWidthCount;      /**< only used internally by the Header */
    uint8_t curItems;
@@ -145,7 +146,9 @@ extern const MeterClass Meter_class;
 
 Meter* Meter_new(const Machine* host, unsigned int param, const MeterClass* type);
 
-int Meter_humanUnit(char* buffer, unsigned long int value, size_t size);
+/* Converts 'value' in kibibytes into a human readable string.
+   Example output strings: "0K", "1023K", "98.7M" and "1.23G" */
+int Meter_humanUnit(char* buffer, double value, size_t size);
 
 void Meter_delete(Object* cast);
 

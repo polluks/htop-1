@@ -13,10 +13,10 @@ in the source distribution for its full text.
 #include <stdbool.h>
 #include <sys/types.h>
 
-#include "linux/IOPriority.h"
 #include "Machine.h"
 #include "Object.h"
 #include "Process.h"
+#include "linux/IOPriority.h"
 
 
 #define PROCESS_FLAG_LINUX_IOPRIO    0x00000100
@@ -41,6 +41,7 @@ typedef struct LinuxProcess_ {
    unsigned long long int cutime;
    unsigned long long int cstime;
    long m_share;
+   long m_priv;
    long m_pss;
    long m_swap;
    long m_psswp;

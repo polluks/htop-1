@@ -1,5 +1,5 @@
 /*
-htop - CGroupUtils.h
+htop - CGroupUtils.c
 (C) 2021 htop dev team
 Released under the GNU GPLv2+, see the COPYING file
 in the source distribution for its full text.
@@ -78,6 +78,7 @@ static bool CGroup_filterName_internal(const char* cgroup, StrBuf_state* s, StrB
    const char* str_nspawn_payload_label = "/payload";
 
    const char* str_snap_scope_prefix = "snap.";
+   const char* str_pod_scope_prefix = "libpod-";
 
    const char* str_service_suffix = ".service";
    const char* str_scope_suffix = ".scope";
@@ -94,7 +95,7 @@ static bool CGroup_filterName_internal(const char* cgroup, StrBuf_state* s, StrB
       }
 
       const char* labelStart = cgroup;
-      const char* nextSlash = strchrnul(labelStart, '/');
+      const char* nextSlash = String_strchrnul(labelStart, '/');
       const size_t labelLen = nextSlash - labelStart;
 
       if (Label_checkEqual(labelStart, labelLen, str_system_slice)) {
@@ -104,7 +105,7 @@ static bool CGroup_filterName_internal(const char* cgroup, StrBuf_state* s, StrB
             return false;
 
          if (String_startsWith(cgroup, str_system_slice_prefix)) {
-            cgroup = strchrnul(cgroup + 1, '/');
+            cgroup = String_strchrnul(cgroup + 1, '/');
             continue;
          }
 
@@ -129,7 +130,7 @@ static bool CGroup_filterName_internal(const char* cgroup, StrBuf_state* s, StrB
          if (!String_startsWith(cgroup, str_user_slice_prefix))
             continue;
 
-         const char* userSliceSlash = strchrnul(cgroup + strlen(str_user_slice_prefix), '/');
+         const char* userSliceSlash = String_strchrnul(cgroup + strlen(str_user_slice_prefix), '/');
          const char* sliceSpec = userSliceSlash - strlen(str_slice_suffix);
 
          if (!String_startsWith(sliceSpec, str_slice_suffix))
@@ -212,7 +213,7 @@ static bool CGroup_filterName_internal(const char* cgroup, StrBuf_state* s, StrB
          while (*labelStart == '/')
             labelStart++;
 
-         nextSlash = strchrnul(labelStart, '/');
+         nextSlash = String_strchrnul(labelStart, '/');
          if (nextSlash - labelStart > 0) {
             if (!StrBuf_putsz(s, w, isMonitor ? "[LXC:" : "[lxc:"))
                return false;
@@ -276,7 +277,7 @@ static bool CGroup_filterName_internal(const char* cgroup, StrBuf_state* s, StrB
 
             continue;
          } else if (Label_checkPrefix(labelStart, scopeNameLen, str_snap_scope_prefix)) {
-            const char* nextDot = strchrnul(labelStart + strlen(str_snap_scope_prefix), '.');
+            const char* nextDot = String_strchrnul(labelStart + strlen(str_snap_scope_prefix), '.');
 
             if (!StrBuf_putsz(s, w, "!snap:"))
                return false;
@@ -286,6 +287,23 @@ static bool CGroup_filterName_internal(const char* cgroup, StrBuf_state* s, StrB
             }
 
             if (!StrBuf_putsn(s, w, labelStart + strlen(str_snap_scope_prefix), nextDot - (labelStart + strlen(str_snap_scope_prefix))))
+               return false;
+
+            cgroup = nextSlash;
+
+            continue;
+         } else if (Label_checkPrefix(labelStart, scopeNameLen, str_pod_scope_prefix)) {
+            const char* nextDot = String_strchrnul(labelStart + strlen(str_pod_scope_prefix), '.');
+
+            if (!StrBuf_putsz(s, w, "!pod:"))
+               return false;
+
+            if (nextDot >= labelStart + scopeNameLen) {
+               nextDot = labelStart + scopeNameLen;
+            }
+
+            if (!StrBuf_putsn(s, w, labelStart + strlen(str_pod_scope_prefix),
+               MINIMUM( nextDot - (labelStart + strlen(str_pod_scope_prefix)), 12)))
                return false;
 
             cgroup = nextSlash;
