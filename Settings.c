@@ -74,6 +74,7 @@ static void writeQuotedList(FILE* fd, char** list) {
 
 void Settings_delete(Settings* this) {
    free(this->filename);
+   free(this->initialFilename);
    for (unsigned int i = 0; i < HeaderLayout_getColumns(this->hLayout); i++) {
       String_freeArray(this->hColumns[i].names);
       free(this->hColumns[i].modes);
@@ -622,8 +623,11 @@ int Settings_write(const Settings* this, bool onCrash) {
       fd = stderr;
       separator = ';';
    } else {
+      /* create tempfile with mode 0600 */
+      mode_t cur_umask = umask(S_IXUSR | S_IRWXG | S_IRWXO);
       xAsprintf(&tmpFilename, "%s.tmp.XXXXXX", this->filename);
       int fdtmp = mkstemp(tmpFilename);
+      umask(cur_umask);
       if (fdtmp == -1)
          return -errno;
       fd = fdopen(fdtmp, "w");
@@ -792,7 +796,7 @@ Settings* Settings_new(unsigned int initialCpuCount, Hashtable* dynamicMeters, H
    char* legacyDotfile = NULL;
    const char* rcfile = getenv("HTOPRC");
    if (rcfile) {
-      this->filename = xStrdup(rcfile);
+      this->initialFilename = xStrdup(rcfile);
    } else {
       const char* home = getenv("HOME");
       if (!home) {
@@ -803,11 +807,11 @@ Settings* Settings_new(unsigned int initialCpuCount, Hashtable* dynamicMeters, H
       char* configDir = NULL;
       char* htopDir = NULL;
       if (xdgConfigHome) {
-         this->filename = String_cat(xdgConfigHome, "/htop/htoprc");
+         this->initialFilename = String_cat(xdgConfigHome, "/htop/htoprc");
          configDir = xStrdup(xdgConfigHome);
          htopDir = String_cat(xdgConfigHome, "/htop");
       } else {
-         this->filename = String_cat(home, "/.config/htop/htoprc");
+         this->initialFilename = String_cat(home, "/.config/htop/htoprc");
          configDir = String_cat(home, "/.config");
          htopDir = String_cat(home, "/.config/htop");
       }
@@ -823,6 +827,11 @@ Settings* Settings_new(unsigned int initialCpuCount, Hashtable* dynamicMeters, H
          legacyDotfile = NULL;
       }
    }
+
+   this->filename = xMalloc(PATH_MAX);
+   if (!realpath(this->initialFilename, this->filename))
+      free_and_xStrdup(&this->filename, this->initialFilename);
+
    this->colorScheme = 0;
 #ifdef HAVE_GETMOUSE
    this->enableMouse = true;

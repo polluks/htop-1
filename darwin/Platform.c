@@ -18,7 +18,7 @@ in the source distribution for its full text.
 #include <net/if_types.h>
 #include <net/route.h>
 #include <sys/socket.h>
-#include <sys/_types/_mach_port_t.h>
+#include <mach/port.h>
 
 #include <CoreFoundation/CFBase.h>
 #include <CoreFoundation/CFDictionary.h>
@@ -478,7 +478,7 @@ bool Platform_getDiskIO(DiskIOData* data) {
 bool Platform_getNetworkIO(NetworkIOData* data) {
    int mib[6] = {CTL_NET,
       PF_ROUTE, /* routing messages */
-      0, /* protocal number, currently always 0 */
+      0, /* protocol number, currently always 0 */
       0, /* select all address families */
       NET_RT_IFLIST2, /* interface list with addresses */
       0};
